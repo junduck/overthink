@@ -353,10 +353,10 @@ def main():
         print(f"   - Using CUDA device: {torch.cuda.get_device_name(0)}")
     elif torch.backends.mps.is_available():
         device = torch.device("mps")
-        print(f"   - Using MPS device (Apple Silicon)")
+        print("   - Using MPS device (Apple Silicon)")
     else:
         device = torch.device("cpu")
-        print(f"   - Using CPU device")
+        print("   - Using CPU device")
 
     model = model.to(device)
     print(f"   - Model moved to {device}")
