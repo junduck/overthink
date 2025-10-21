@@ -1,0 +1,3 @@
+[TYPECHECK]
+# not-callable false positive for torch.nn.functional
+ignored-modules=torch.nn.functional
