@@ -18,4 +18,6 @@ class Embed(nn.Module):
             torch.empty(embed_num, embed_dim), std=std))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.nn.functional.embedding(x, self.w.to(x.dtype))
+        # Ensure weights are on the same device and dtype as input
+        w = self.w.to(device=x.device, dtype=x.dtype)
+        return torch.nn.functional.embedding(x, w)

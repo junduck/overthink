@@ -68,7 +68,11 @@ class AutoregressiveForecastHead(nn.Module):
         if self.aggregation == 'mean':
             agg = x.mean(dim=1)
         elif self.aggregation == 'ema':
-            agg = (x * self.ema_weights).sum(dim=1)  # type: ignore
+            # Ensure ema_weights is on the same device as input
+            ema_w = self.ema_weights
+            assert isinstance(ema_w, torch.Tensor)
+            ema_weights = ema_w.to(device=x.device, dtype=x.dtype)
+            agg = (x * ema_weights).sum(dim=1)
         else:
             agg = x[:, -1, :]
 

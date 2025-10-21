@@ -20,4 +20,8 @@ class Linear(nn.Module):
         self.b = nn.Parameter(torch.zeros(out_features)) if bias else None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.nn.functional.linear(x, self.w.to(x.dtype), self.b.to(x.dtype) if self.b is not None else None)
+        # Ensure weights are on the same device and dtype as input
+        w = self.w.to(device=x.device, dtype=x.dtype)
+        b = self.b.to(device=x.device,
+                      dtype=x.dtype) if self.b is not None else None
+        return torch.nn.functional.linear(x, w, b)

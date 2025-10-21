@@ -112,7 +112,7 @@ def train_model(
         num_batches = 0
 
         # Shuffle data
-        perm = torch.randperm(num_samples)
+        perm = torch.randperm(num_samples, device=X_train.device)
         X_train = X_train[perm]
         y_train = y_train[perm]
 
@@ -347,8 +347,27 @@ def main():
     num_params = sum(p.numel() for p in model.parameters())
     print(f"   - Total parameters: {num_params:,}")
 
+    # Determine device and move model
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+        print(f"   - Using CUDA device: {torch.cuda.get_device_name(0)}")
+    elif torch.backends.mps.is_available():
+        device = torch.device("mps")
+        print(f"   - Using MPS device (Apple Silicon)")
+    else:
+        device = torch.device("cpu")
+        print(f"   - Using CPU device")
+
+    model = model.to(device)
+    print(f"   - Model moved to {device}")
+
     # Train model - Fewer epochs for faster debugging
     print("\n3. Training model...")
+    # Move training data to device
+    X_train = X_train.to(device)
+    y_train = y_train.to(device)
+    print(f"   - Training data moved to {device}")
+
     losses = train_model(
         model=model,
         X_train=X_train,
@@ -361,6 +380,10 @@ def main():
     # Evaluate on test set
     print("\n4. Evaluating on test set...")
     model.eval()
+    # Move test data to device
+    X_test = X_test.to(device)
+    y_test = y_test.to(device)
+
     with torch.no_grad():
         test_predictions = model(X_test)
         test_loss = nn.MSELoss()(test_predictions, y_test)
@@ -368,10 +391,11 @@ def main():
 
     # Plot results
     print("\n5. Generating plots...")
+    # Move tensors back to CPU for plotting
     plot_results(
-        X_test=X_test,
-        y_test=y_test,
-        predictions=test_predictions,
+        X_test=X_test.cpu(),
+        y_test=y_test.cpu(),
+        predictions=test_predictions.cpu(),
         losses=losses,
         save_path="forecast_results.png"
     )

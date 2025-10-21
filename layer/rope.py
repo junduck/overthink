@@ -86,8 +86,9 @@ class RoPE(nn.Module):
                 sin_cached, torch.Tensor)
 
         # Get cos/sin for current sequence length: shape (1, seq_len, 1, dim)
-        cos = cos_cached[:, :seq_len, :, :]
-        sin = sin_cached[:, :seq_len, :, :]
+        # Ensure they are on the same device as input
+        cos = cos_cached[:, :seq_len, :, :].to(device=q.device, dtype=q.dtype)
+        sin = sin_cached[:, :seq_len, :, :].to(device=q.device, dtype=q.dtype)
 
         # Apply rotation: x * cos + rotate_half(x) * sin
         q_embed = q * cos + self._rotate_half(q) * sin
