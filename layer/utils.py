@@ -73,16 +73,19 @@ class RevIN(nn.Module):
             self.affine_w = nn.Parameter(torch.ones(feature_num))
             self.affine_b = nn.Parameter(torch.zeros(feature_num))
 
+    def _denorm(self, x: torch.Tensor, m: torch.Tensor, std: torch.Tensor) -> torch.Tensor:
+        if self.affine:
+            x = (x - self.affine_b) / self.affine_w
+        x = x * std + m
+        return x
+
     def forward(self, x: torch.Tensor, denorm: bool = False) -> torch.Tensor:
-        if not denorm:
-            self.mean = x.mean(dim=1, keepdim=True)
-            self.stdev = torch.sqrt(
-                x.var(dim=1, keepdim=True, unbiased=False) + self.eps)
-            x = (x - self.mean) / self.stdev
+        mean = x.mean(dim=1, keepdim=True)
+        std = torch.sqrt(x.var(dim=1, keepdim=True) + self.eps)
+        if denorm:
+            x = self._denorm(x, mean, std)
+        else:
+            x = (x - mean) / std
             if self.affine:
                 x = x * self.affine_w + self.affine_b
-        else:
-            if self.affine:
-                x = (x - self.affine_b) / self.affine_w
-            x = x * self.stdev + self.mean
         return x
