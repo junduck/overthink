@@ -18,6 +18,7 @@ class Attention(nn.Module):
         causal: Whether to apply causal masking (default: False)
         rope: Optional RoPE module to apply. Pass a shared RoPE instance
               across layers to avoid redundant cache creation (default: None)
+        dtype: Data type for parameters ('float32', 'float16', 'bfloat16')
     """
 
     def __init__(
@@ -26,7 +27,8 @@ class Attention(nn.Module):
         head_num: int,
         head_dim: int,
         causal: bool = False,
-        rope: Optional[RoPE] = None
+        rope: Optional[RoPE] = None,
+        dtype: torch.dtype = torch.float32
     ):
         super().__init__()
 
@@ -37,9 +39,9 @@ class Attention(nn.Module):
         self.rope_module = rope
 
         self.qkv = Linear(in_features=hidden_size,
-                          out_features=output_size * 3, bias=False)
+                          out_features=output_size * 3, bias=False, dtype=dtype)
         self.out = Linear(in_features=output_size,
-                          out_features=hidden_size, bias=False)
+                          out_features=hidden_size, bias=False, dtype=dtype)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         qkv = self.qkv(x)

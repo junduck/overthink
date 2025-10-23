@@ -21,6 +21,7 @@ class TransBlock(nn.Module):
         expansion_factor: MLP expansion factor for intermediate dimension
         eps: Epsilon for RMS normalization
         rope: Optional RoPE module to use in attention
+        dtype: Data type for parameters ('float32', 'float16', 'bfloat16')
     """
 
     def __init__(self,
@@ -29,7 +30,8 @@ class TransBlock(nn.Module):
                  causal: bool,
                  expansion_factor: float,
                  eps: float,
-                 rope: Optional[RoPE] = None,):
+                 rope: Optional[RoPE] = None,
+                 dtype: torch.dtype = torch.float32):
         super().__init__()
 
         self.eps = eps
@@ -40,10 +42,12 @@ class TransBlock(nn.Module):
             head_dim=head_dim,
             head_num=head_num,
             causal=causal,
-            rope=rope
+            rope=rope,
+            dtype=dtype
         )
         self.mlp = SwiGLU(hidden_size=hidden_size,
-                          expansion_factor=expansion_factor)
+                          expansion_factor=expansion_factor,
+                          dtype=dtype)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x + self.self_attn(rms_norm(x, eps=self.eps))

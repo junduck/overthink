@@ -22,6 +22,7 @@ class AutoregressiveForecastHead(nn.Module):
         aggregation: Method to aggregate sequence ('mean', 'ema', 'last')
         ema_decay: Decay rate for EMA aggregation
         delta_scale: Scaling factor for delta predictions (default: 0.1)
+        dtype: Data type for parameters ('float32', 'float16', 'bfloat16')
     """
 
     def __init__(self,
@@ -30,22 +31,22 @@ class AutoregressiveForecastHead(nn.Module):
                  feature_num: int,
                  aggregation: Literal['mean', 'ema', 'last'],
                  ema_decay: float,
-                 delta_scale: float = 0.1):
+                 delta_scale: float = 0.1,
+                 dtype: torch.dtype = torch.float32):
         super().__init__()
 
         self.delta_scale = delta_scale
 
         # Predict delta (change) rather than absolute value
         self.forecast_delta = Linear(in_features=hidden_size,
-                                     out_features=feature_num, bias=True)
+                                     out_features=feature_num, bias=True, dtype=dtype)
 
         # Initialize to output near-zero deltas for stability
         with torch.no_grad():
             # Scale based on lookback to account for autoregressive depth
             scale = 1.0 / math.sqrt(lookback_horizon)
             self.forecast_delta.w.mul_(scale)
-            if self.forecast_delta.b is not None:
-                self.forecast_delta.b.zero_()
+            self.forecast_delta.b.zero_()  # type: ignore
 
         if aggregation == "ema":
             pos = torch.arange(lookback_horizon - 1, -1, -1).float()
@@ -70,9 +71,8 @@ class AutoregressiveForecastHead(nn.Module):
         elif self.aggregation == 'ema':
             # Ensure ema_weights is on the same device as input
             ema_w = self.ema_weights
-            assert isinstance(ema_w, torch.Tensor)
             ema_weights = ema_w.to(device=x.device, dtype=x.dtype)
-            agg = (x * ema_weights).sum(dim=1)
+            agg = (x * ema_weights).sum(dim=1)  # type: ignore
         else:
             agg = x[:, -1, :]
 

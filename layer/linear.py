@@ -1,6 +1,8 @@
 import math
+
 import torch
 from torch import nn
+
 from .utils import trunc_normal
 
 
@@ -11,13 +13,23 @@ class Linear(nn.Module):
         in_features: Input feature dimension
         out_features: Output feature dimension
         bias: Whether to include bias term (default: True)
+        dtype: Data type for parameters ('float32', 'float16', 'bfloat16')
     """
 
-    def __init__(self, in_features: int, out_features: int, bias: bool = True):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        bias: bool = True,
+        dtype: torch.dtype = torch.float32
+    ):
         super().__init__()
+
         self.w = nn.Parameter(trunc_normal(
-            torch.empty(out_features, in_features), std=1./math.sqrt(in_features)))
-        self.b = nn.Parameter(torch.zeros(out_features)) if bias else None
+            torch.empty(out_features, in_features, dtype=dtype),
+            std=1./math.sqrt(in_features)))
+        self.b = nn.Parameter(torch.zeros(
+            out_features, dtype=dtype)) if bias else None
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Ensure weights are on the same device and dtype as input

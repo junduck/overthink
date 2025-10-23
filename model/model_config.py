@@ -1,8 +1,15 @@
 from typing import Literal
 from pydantic import BaseModel, Field
 
+import torch
+
 
 class ModelConfig(BaseModel):
+    # General
+    model_dtype: Literal['float32', 'float16', 'bfloat16'] = Field(
+        default='float32',
+        description="Data type for model parameters and computations")
+
     # Time series
     feature_num: int = Field(
         description="Number of input/output features")

@@ -5,7 +5,10 @@ from torch import nn
 
 
 class MultiScaleTrendLoss(nn.Module):
-    def __init__(self, alphas: list[float], weights: list[float], reduction: Literal["mean", "sum", "none"] = "mean"):
+    def __init__(self,
+                 alphas: list[float],
+                 weights: list[float],
+                 reduction: Literal["mean", "sum", "none"] = "mean"):
         if (len(alphas) != len(weights)):
             raise ValueError("alphas and weights must have the same length.")
         super().__init__()

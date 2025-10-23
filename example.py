@@ -20,8 +20,8 @@ from model.overthink import OverthinkModel
 
 def generate_synthetic_data(
     num_samples: int = 1000,
-    lookback_horizon: int = 50,
-    forecast_horizon: int = 20,
+    lookback_horizon: int = 40,
+    forecast_horizon: int = 10,
     feature_num: int = 1,
     noise_level: float = 0.1,
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -276,6 +276,7 @@ def main():
         expansion_factor=2.0,  # Reduced from 4.0
         forecast_aggregation='mean',  # Simpler than ema
         forecast_ema_decay=0.1,
+        model_dtype='float32',  # Use float32 for stability
     )
 
     print("\n1. Generating synthetic data...")

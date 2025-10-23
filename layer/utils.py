@@ -1,10 +1,29 @@
 import math
+from typing import Literal, Optional
+
 import torch
 from torch import nn
 
 
-def trunc_normal(tensor: torch.Tensor, std: float = 1., lower: float = -2., upper: float = 2.) -> torch.Tensor:
-    """Initialize a tensor with values drawn from a truncated normal distribution.
+def get_torch_dtype(dtype_str: Literal['float32', 'float16', 'bfloat16']) -> torch.dtype:
+    """Convert dtype string to torch dtype.
+
+    Args:
+        dtype_str: String representation of dtype
+
+    Returns:
+        torch.dtype corresponding to the string
+    """
+    dtype_map = {
+        'float32': torch.float32,
+        'float16': torch.float16,
+        'bfloat16': torch.bfloat16,
+    }
+    return dtype_map[dtype_str]
+
+
+def trunc_normal(tensor: torch.Tensor, std: float = 1.0, lower: float = -2.0, upper: float = 2.0) -> torch.Tensor:
+    """Initialize tensor with truncated normal distribution.
     Args:
         tensor (torch.Tensor): The tensor to be initialized.
         std (float, optional): Standard deviation of the normal distribution. Default is 1.
@@ -49,10 +68,11 @@ def rms_norm(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
 class RMSNorm(nn.Module):
     """RMSNorm with learnable scale parameter (like LLaMA)."""
 
-    def __init__(self, hidden_size: int, eps: float = 1e-8):
+    def __init__(self, hidden_size: int, eps: float = 1e-8, dtype: Optional[Literal['float32', 'float16', 'bfloat16']] = None):
         super().__init__()
         self.eps = eps
-        self.w = torch.nn.Parameter(torch.ones(hidden_size))
+        torch_dtype = get_torch_dtype(dtype) if dtype else torch.float32
+        self.w = torch.nn.Parameter(torch.ones(hidden_size, dtype=torch_dtype))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         orig = x.dtype

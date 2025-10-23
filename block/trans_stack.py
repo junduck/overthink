@@ -21,6 +21,7 @@ class TransStack(nn.Module):
         expansion_factor: MLP expansion factor for intermediate dimension
         eps: Epsilon for RMS normalization
         rope: Optional RoPE module to use in attention
+        dtype: Data type for parameters ('float32', 'float16', 'bfloat16')
     """
 
     def __init__(self,
@@ -30,7 +31,8 @@ class TransStack(nn.Module):
                  causal: bool,
                  expansion_factor: float,
                  eps: float,
-                 rope: Optional[RoPE] = None,):
+                 rope: Optional[RoPE] = None,
+                 dtype: torch.dtype = torch.float32):
         super().__init__()
         self.layers = nn.ModuleList([
             TransBlock(
@@ -40,6 +42,7 @@ class TransStack(nn.Module):
                 expansion_factor=expansion_factor,
                 eps=eps,
                 rope=rope,
+                dtype=dtype,
             ) for _ in range(layer_num)
         ])
 

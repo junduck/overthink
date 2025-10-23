@@ -1,6 +1,7 @@
+from typing import Tuple
+
 import torch
 from torch import nn
-from typing import Tuple
 
 
 class RoPE(nn.Module):
@@ -14,27 +15,35 @@ class RoPE(nn.Module):
         dim: Dimension of each attention head
         max_seq_len: Maximum sequence length (default: 8192)
         theta: Base for the exponential decay (default: 10000)
+        dtype: Data type for buffers ('float32', 'float16', 'bfloat16')
     """
 
-    def __init__(self, dim: int, max_seq_len: int = 8192, theta: float = 10000.0):
+    def __init__(
+        self,
+        dim: int,
+        max_seq_len: int = 8192,
+        theta: float = 10000.0,
+        dtype: torch.dtype = torch.float32
+    ):
         super().__init__()
         self.dim = dim
         self.max_seq_len = max_seq_len
         self.theta = theta
 
         # Precompute frequency tensor: shape (dim // 2,)
-        inv_freq = 1.0 / (theta ** (torch.arange(0, dim, 2).float() / dim))
+        inv_freq = 1.0 / \
+            (theta ** (torch.arange(0, dim, 2, dtype=dtype) / dim))
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
         # Precompute cos and sin cache for efficiency
-        self._build_cache(max_seq_len)
+        self._build_cache(max_seq_len, dtype)
 
-    def _build_cache(self, seq_len: int):
+    def _build_cache(self, seq_len: int, dtype: torch.dtype = torch.float32):
         """Build cos/sin cache for the given sequence length."""
         # Create position indices: shape (seq_len,)
         inv_freq = self.inv_freq
         assert isinstance(inv_freq, torch.Tensor)
-        t = torch.arange(seq_len, dtype=inv_freq.dtype)
+        t = torch.arange(seq_len, dtype=dtype)
 
         # Compute frequencies: shape (seq_len, dim // 2)
         freqs = torch.outer(t, inv_freq)
@@ -79,7 +88,7 @@ class RoPE(nn.Module):
             sin_cached, torch.Tensor)
 
         if seq_len > cos_cached.shape[1]:
-            self._build_cache(seq_len)
+            self._build_cache(seq_len, q.dtype)
             cos_cached = self.cos_cached
             sin_cached = self.sin_cached
             assert isinstance(cos_cached, torch.Tensor) and isinstance(

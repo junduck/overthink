@@ -11,6 +11,7 @@ from layer.forecast import AutoregressiveForecastHead
 from layer.linear import Linear
 from layer.rope import RoPE
 from layer.swiglu import SwiGLU
+from layer.utils import get_torch_dtype
 
 from .model_config import ModelConfig
 
@@ -24,20 +25,24 @@ class OverthinkModel(nn.Module):
     def __init__(self, config: ModelConfig):
         super().__init__()
         self.config = config
+        dtype = get_torch_dtype(config.model_dtype)
 
         self.rope = RoPE(dim=config.hidden_size // config.head_num,
                          max_seq_len=config.rope_max_seq_len,
-                         theta=config.rope_theta)
+                         theta=config.rope_theta,
+                         dtype=dtype)
 
         # Use SwiGLU for richer feature mixing
         self.input_proj_linear = Linear(
             in_features=config.feature_num,
             out_features=config.hidden_size,
-            bias=True
+            bias=True,
+            dtype=dtype
         )
         self.input_feat_mixing = SwiGLU(
             hidden_size=config.hidden_size,
-            expansion_factor=config.expansion_factor
+            expansion_factor=config.expansion_factor,
+            dtype=dtype
         )
         self.input_scale = 1. / math.sqrt(config.hidden_size)
 
@@ -49,6 +54,7 @@ class OverthinkModel(nn.Module):
             expansion_factor=config.expansion_factor,
             eps=config.rms_eps,
             rope=self.rope if config.use_rope else None,
+            dtype=dtype,
         )
 
         self.low_freq_reasoning = TransBlock(
@@ -58,6 +64,7 @@ class OverthinkModel(nn.Module):
             expansion_factor=config.expansion_factor,
             eps=config.rms_eps,
             rope=self.rope if config.use_rope else None,
+            dtype=dtype,
         )
 
         self.forecast_head = AutoregressiveForecastHead(
@@ -67,21 +74,13 @@ class OverthinkModel(nn.Module):
             aggregation=config.forecast_aggregation,
             ema_decay=config.forecast_ema_decay,
             delta_scale=config.forecast_residual_scale,
+            dtype=dtype,
         )
 
         self.high_freq_init = nn.Parameter(
-            torch.zeros(config.hidden_size))
+            torch.zeros(config.hidden_size, dtype=dtype))
         self.low_freq_init = nn.Parameter(
-            torch.zeros(config.hidden_size))
-
-        # TODO: support ACT
-        if False:
-            self.q_head = Linear(in_features=config.hidden_size,
-                                 out_features=1, bias=True)
-            with torch.no_grad():
-                self.q_head.w.zero_()
-                if self.q_head.b is not None:
-                    self.q_head.b.fill_(-10.0)
+            torch.zeros(config.hidden_size, dtype=dtype))
 
     def input_projection(self, input_seq: torch.Tensor) -> torch.Tensor:
         """Project input sequence to hidden dimension with SwiGLU for feature mixing.
@@ -126,7 +125,6 @@ class OverthinkModel(nn.Module):
             high_freq = self.high_freq_reasoning(high_freq, res_h)
         low_freq = self.low_freq_reasoning(low_freq + high_freq)
 
-        # TODO: support ACT, conditionally .detach()
         return high_freq, low_freq
 
     def forward(self,
