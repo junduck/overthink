@@ -39,7 +39,7 @@ class OverthinkModel(nn.Module):
             hidden_size=config.hidden_size,
             expansion_factor=config.expansion_factor
         )
-        self.input_scale = math.sqrt(config.hidden_size)
+        self.input_scale = 1. / math.sqrt(config.hidden_size)
 
         self.high_freq_reasoning = TransStack(
             layer_num=config.hidden_layer_num,
@@ -97,7 +97,7 @@ class OverthinkModel(nn.Module):
         # Apply SwiGLU for non-linear feature mixing
         x = self.input_feat_mixing(x)  # [B, S, hidden_size]
         # Normalize by sqrt(hidden_size) to prevent explosion
-        x = x / self.input_scale
+        x = x * self.input_scale
         return x
 
     def reasoning(self,
