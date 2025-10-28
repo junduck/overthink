@@ -77,7 +77,8 @@ class AutoregressiveForecastHead(nn.Module):
             agg = x[:, -1, :]
 
         # Predict delta (change from last value)
-        delta = self.forecast_delta(agg).unsqueeze(1)  # [B, 1, feature_num]
+        # Bound delta with tanh to improve numerical stability in autoregressive loop
+        delta = torch.tanh(self.forecast_delta(agg)).unsqueeze(1)  # [B, 1, feature_num]
 
         # Apply delta to last value with scaling
         next_value = last_value + self.delta_scale * delta
