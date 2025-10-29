@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 
+# from model.goldfish import GoldfishModel
 from model.model_config import ModelConfig
 from model.overthink import OverthinkModel
 
@@ -264,8 +265,8 @@ def main():
     config = ModelConfig(
         feature_num=1,
         lookback_horizon=40,
-        forecast_horizon=10,
-        batch_size=16,
+        forecast_horizon=20,
+        batch_size=64,
         high_freq_step=3,
         low_freq_step=2,
         hidden_layer_num=2,
@@ -273,10 +274,11 @@ def main():
         head_num=2,
         use_causal=True,
         use_rope=True,
-        expansion_factor=2.0,  # Reduced from 4.0
-        forecast_aggregation='mean',  # Simpler than ema
+        expansion_factor=2.0,
+        forecast_aggregation='ema',
         forecast_ema_decay=0.1,
-        model_dtype='float32',  # Use float32 for stability
+        learnable_forecast_residual_scale=True,
+        model_dtype='bfloat16',
     )
 
     print("\n1. Generating synthetic data...")
@@ -290,15 +292,15 @@ def main():
         lookback_horizon=config.lookback_horizon,
         forecast_horizon=config.forecast_horizon,
         feature_num=config.feature_num,
-        noise_level=0.05,     # Reduced noise
+        noise_level=0.1,     # Reduced noise
     )
 
     X_test, y_test = generate_synthetic_data(
-        num_samples=20,       # Reduced from 100
+        num_samples=40,       # Reduced from 100
         lookback_horizon=config.lookback_horizon,
         forecast_horizon=config.forecast_horizon,
         feature_num=config.feature_num,
-        noise_level=0.05,     # Reduced noise
+        noise_level=0.1,     # Reduced noise
     )
 
     print(f"   - Training samples: {X_train.size(0)}")
@@ -345,6 +347,7 @@ def main():
     # Initialize model
     print("\n2. Initializing model...")
     model = OverthinkModel(config)
+    # model = GoldfishModel(config)
     num_params = sum(p.numel() for p in model.parameters())
     print(f"   - Total parameters: {num_params:,}")
 
@@ -373,8 +376,8 @@ def main():
         model=model,
         X_train=X_train,
         y_train=y_train,
-        num_epochs=20,        # Reduced from 100
-        learning_rate=0.0001,  # Reduced learning rate to prevent NaN
+        num_epochs=50,        # Reduced from 100
+        learning_rate=0.001,  # Reduced learning rate to prevent NaN
         batch_size=config.batch_size,
     )
 

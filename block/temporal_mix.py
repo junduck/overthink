@@ -2,7 +2,7 @@ import torch
 from torch import nn
 from einops import rearrange
 
-from layer.swiglu import SwiGLU
+from layer import SwiGLU
 from layer.utils import rms_norm
 
 

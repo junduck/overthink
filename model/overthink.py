@@ -2,15 +2,11 @@ import math
 from typing import Tuple
 
 import torch
-from torch import nn
 from einops import repeat
+from torch import nn
 
-from block.trans_block import TransBlock
-from block.trans_stack import TransStack
-from layer.forecast import AutoregressiveForecastHead
-from layer.linear import Linear
-from layer.rope import RoPE
-from layer.swiglu import SwiGLU
+from block import TransBlock, TransStack, AutoregressiveHead
+from layer import Linear, RoPE, SwiGLU
 from layer.utils import get_torch_dtype
 
 from .model_config import ModelConfig
@@ -45,11 +41,13 @@ class OverthinkModel(nn.Module):
             dtype=dtype
         )
         self.input_scale = 1. / math.sqrt(config.hidden_size)
+        self.input_dropout = nn.Dropout(config.input_mixing_dropout)
 
         self.high_freq_reasoning = TransStack(
             layer_num=config.hidden_layer_num,
             hidden_size=config.hidden_size,
             head_num=config.head_num,
+            dropout=config.attn_dropout,
             causal=config.use_causal,
             expansion_factor=config.expansion_factor,
             eps=config.rms_eps,
@@ -60,6 +58,7 @@ class OverthinkModel(nn.Module):
         self.low_freq_reasoning = TransBlock(
             hidden_size=config.hidden_size,
             head_num=config.head_num,
+            dropout=config.attn_dropout,
             causal=False,  # non-causal for bi-dir aggr
             expansion_factor=config.expansion_factor,
             eps=config.rms_eps,
@@ -67,13 +66,14 @@ class OverthinkModel(nn.Module):
             dtype=dtype,
         )
 
-        self.forecast_head = AutoregressiveForecastHead(
+        self.forecast_head = AutoregressiveHead(
             hidden_size=config.hidden_size,
             lookback_horizon=config.lookback_horizon,
             feature_num=config.feature_num,
             aggregation=config.forecast_aggregation,
             ema_decay=config.forecast_ema_decay,
             delta_scale=config.forecast_residual_scale,
+            learnable_delta_scale=config.learnable_forecast_residual_scale,
             dtype=dtype,
         )
 
@@ -97,6 +97,7 @@ class OverthinkModel(nn.Module):
         x = self.input_feat_mixing(x)  # [B, S, hidden_size]
         # Normalize by sqrt(hidden_size) to prevent explosion
         x = x * self.input_scale
+        x = self.input_dropout(x)
         return x
 
     def reasoning(self,

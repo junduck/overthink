@@ -43,7 +43,7 @@ class ModelConfig(BaseModel):
         default=4.0,
         description="MLP expansion factor for intermediate dimension")
     attn_dropout: float = Field(
-        default=0.1,
+        default=0.0,
         description="Dropout rate for attention weights")
 
     # RoPE
@@ -69,3 +69,6 @@ class ModelConfig(BaseModel):
     forecast_residual_scale: float = Field(
         default=0.05,
         description="Scaling factor for residual connection in forecast head")
+    learnable_forecast_residual_scale: bool = Field(
+        default=False,
+        description="Whether to make the forecast residual scale a learnable parameter")
