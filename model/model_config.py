@@ -7,6 +7,14 @@ class ModelConfig(BaseModel):
     model_dtype: Literal['float32', 'float16', 'bfloat16'] = Field(
         default='float32',
         description="Data type for model parameters and computations")
+    teacher_forcing: bool = Field(
+        default=False,
+        description="Whether to use teacher forcing during training"
+    )
+    teacher_forcing_ratio: float = Field(
+        default=0.6,
+        description="Probability of enforcing teacher forcing"
+    )
 
     # Time series
     feature_num: int = Field(
@@ -18,6 +26,9 @@ class ModelConfig(BaseModel):
     input_mixing_dropout: float = Field(
         default=0.1,
         description="Dropout rate for input feature mixing")
+    decoder_only: bool = Field(
+        default=True,
+        description="Whether to use a decoder-only architecture")
 
     # Batch
     batch_size: int = Field(description="Batch size for training")
