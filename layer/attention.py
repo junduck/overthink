@@ -26,6 +26,7 @@ class Attention(nn.Module):
         hidden_size: int,
         head_num: int,
         head_dim: int,
+        dropout: float = 0.0,
         causal: bool = False,
         rope: Optional[RoPE] = None,
         dtype: torch.dtype = torch.float32
@@ -35,6 +36,7 @@ class Attention(nn.Module):
         output_size = head_dim * head_num
         self.head_dim = head_dim
         self.head_num = head_num
+        self.dropout = dropout
         self.causal = causal
         self.rope_module = rope
 
@@ -57,5 +59,5 @@ class Attention(nn.Module):
         k = einops.rearrange(k, 'b s h d -> b h s d')
         v = einops.rearrange(v, 'b s h d -> b h s d')
         score = torch.nn.functional.scaled_dot_product_attention(
-            q, k, v, is_causal=self.causal)
+            q, k, v, dropout_p=self.dropout, is_causal=self.causal)
         return self.out(einops.rearrange(score, 'b h s d -> b s (h d)'))
