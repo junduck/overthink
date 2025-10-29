@@ -1,8 +1,6 @@
 from typing import Literal
 from pydantic import BaseModel, Field
 
-import torch
-
 
 class ModelConfig(BaseModel):
     # General
@@ -17,6 +15,9 @@ class ModelConfig(BaseModel):
         description="Number of past time steps to consider")
     forecast_horizon: int = Field(
         description="Number of future time steps to predict")
+    input_mixing_dropout: float = Field(
+        default=0.1,
+        description="Dropout rate for input feature mixing")
 
     # Batch
     batch_size: int = Field(description="Batch size for training")
@@ -41,6 +42,9 @@ class ModelConfig(BaseModel):
     expansion_factor: float = Field(
         default=4.0,
         description="MLP expansion factor for intermediate dimension")
+    attn_dropout: float = Field(
+        default=0.1,
+        description="Dropout rate for attention weights")
 
     # RoPE
     rope_theta: float = Field(
