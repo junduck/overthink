@@ -1,8 +1,7 @@
 import math
-from typing import Literal, Optional
+from typing import Literal
 
 import torch
-from torch import nn
 
 
 def get_torch_dtype(dtype_str: Literal['float32', 'float16', 'bfloat16']) -> torch.dtype:
@@ -60,52 +59,50 @@ def rms_norm(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     """Functional RMSNorm without learnable parameters."""
     orig = x.dtype
     x = x.float()
-    var = x.square().mean(-1, keepdim=True)
-    x = x * torch.rsqrt(var + eps)
+    m2 = x.square().mean(-1, keepdim=True)
+    x = x * torch.rsqrt(m2 + eps)
     return x.to(orig)
 
 
-class RMSNorm(nn.Module):
-    """RMSNorm with learnable scale parameter (like LLaMA)."""
+def ema_weights(decay: float, length: int, dtype: torch.dtype = torch.float32) -> torch.Tensor:
+    """Generate EMA weights
 
-    def __init__(self, hidden_size: int, eps: float = 1e-8, dtype: Optional[Literal['float32', 'float16', 'bfloat16']] = None):
-        super().__init__()
-        self.eps = eps
-        torch_dtype = get_torch_dtype(dtype) if dtype else torch.float32
-        self.w = torch.nn.Parameter(torch.ones(hidden_size, dtype=torch_dtype))
+    Args:
+        decay: Decay rate for EMA (0 < decay < 1). Higher values give more weight to recent timesteps.
+        length: Length of the sequence (number of timesteps).
+        dtype: Data type for the weights (default: torch.float32).
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        orig = x.dtype
-        x = x.float()
-        var = x.square().mean(-1, keepdim=True)
-        x = x * torch.rsqrt(var + self.eps)
-        return (self.w * x).to(orig)
+    Returns:
+        EMA weights tensor of shape [length] that sums to 1.
+
+    Example:
+        >>> weights = ema_weights(decay=0.1, length=5)
+        >>> print(weights.shape)  # torch.Size([5])
+        >>> print(weights.sum())  # tensor(1.)
+    """
+    if not 0 < decay < 1:
+        raise ValueError(f"Decay must be between 0 and 1, got {decay}")
+    if length <= 0:
+        raise ValueError(f"Length must be positive, got {length}")
+
+    decay_factors = torch.cumprod(
+        torch.full((length,), 1.0 - decay, dtype=torch.float32),
+        dim=0
+    )
+    # Reverse to give more weight to recent timesteps
+    decay_factors = torch.flip(decay_factors, [0])
+    # Normalize to sum to 1
+    w = (decay_factors / decay_factors.sum()).view(-1).to(dtype=dtype)
+
+    return w
 
 
-class RevIN(nn.Module):
-    """Reversible Instance Normalization (RevIN) module."""
-
-    def __init__(self, feature_num: int, eps: float = 1e-5, affine: bool = True):
-        super().__init__()
-        self.eps = eps
-        self.affine = affine
-        if affine:
-            self.affine_w = nn.Parameter(torch.ones(feature_num))
-            self.affine_b = nn.Parameter(torch.zeros(feature_num))
-
-    def _denorm(self, x: torch.Tensor, m: torch.Tensor, std: torch.Tensor) -> torch.Tensor:
-        if self.affine:
-            x = (x - self.affine_b) / self.affine_w
-        x = x * std + m
-        return x
-
-    def forward(self, x: torch.Tensor, denorm: bool = False) -> torch.Tensor:
-        mean = x.mean(dim=1, keepdim=True)
-        std = torch.sqrt(x.var(dim=1, keepdim=True) + self.eps)
-        if denorm:
-            x = self._denorm(x, mean, std)
-        else:
-            x = (x - mean) / std
-            if self.affine:
-                x = x * self.affine_w + self.affine_b
-        return x
+def ema(x: torch.Tensor, dim: int, alpha: float) -> torch.Tensor:
+    """Compute Exponential Moving Average (EMA) along a specified dimension."""
+    m = torch.empty_like(x)
+    m.select(dim, 0).copy_(x.select(dim, 0))
+    for i in range(1, x.size(dim)):
+        prev = m.select(dim, i - 1)
+        cur = x.select(dim, i)
+        m.select(dim, i).copy_(prev + alpha * (cur - prev))
+    return m
