@@ -77,6 +77,14 @@ def generate_synthetic_data(
     return X, y
 
 
+def linear_teacher_forcing_ratio(epoch, total_epochs, initial_ratio=0.8, final_ratio=0.1):
+    """Calculate teacher forcing ratio based on training progress."""
+    # Linear decay from initial_ratio to final_ratio
+    progress = epoch / total_epochs
+    ratio = initial_ratio + (final_ratio - initial_ratio) * progress
+    return max(final_ratio, ratio)
+
+
 def train_model(
     model: nn.Module,
     X_train: torch.Tensor,
@@ -131,7 +139,10 @@ def train_model(
 
             # Forward pass
             optimizer.zero_grad()
-            predictions = model(batch_X)
+            tf_ratio = linear_teacher_forcing_ratio(epoch, num_epochs)
+            predictions = model(input_seq=batch_X,
+                                target_seq=batch_y,
+                                tf_ratio_overwrite=tf_ratio)
 
             # Debug first batch of first epoch
             if epoch == 0 and i == 0:
@@ -192,6 +203,36 @@ def train_model(
         })
 
     return losses
+
+
+def print_layer_params(model, indent=0):
+    """Recursively print parameter count for each layer in a model.
+
+    Args:
+        model: The PyTorch model or module
+        indent: Current indentation level for nested modules
+    """
+    prefix = "  " * indent
+    total_params = 0
+
+    # Get all named modules and parameters
+    for name, module in model.named_modules():
+        # Skip the root model itself to avoid duplication
+        if name == "":
+            continue
+
+        # Count parameters in this module
+        module_params = sum(p.numel() for p in module.parameters())
+        if module_params > 0:
+            # Calculate full name path
+            full_name = name
+            print(f"{prefix}{full_name}: {module_params:,} parameters")
+            total_params += module_params
+
+    # Print total for this level
+    if indent == 0:
+        root_params = sum(p.numel() for p in model.parameters())
+        print(f"\n{prefix}Total: {root_params:,} parameters")
 
 
 def plot_results(
@@ -350,6 +391,10 @@ def main():
     # model = GoldfishModel(config)
     num_params = sum(p.numel() for p in model.parameters())
     print(f"   - Total parameters: {num_params:,}")
+
+    # Print parameter count per layer
+    print("\n   - Parameter count per layer:")
+    print_layer_params(model)
 
     # Determine device and move model
     if torch.cuda.is_available():
