@@ -3,13 +3,15 @@ from typing import Literal
 import torch
 from torch import nn
 
+from layer.utils import ema
+
 
 class MultiScaleTrendLoss(nn.Module):
     def __init__(self,
                  alphas: list[float],
                  weights: list[float],
                  reduction: Literal["mean", "sum", "none"] = "mean"):
-        if (len(alphas) != len(weights)):
+        if len(alphas) != len(weights):
             raise ValueError("alphas and weights must have the same length.")
         super().__init__()
 
@@ -17,21 +19,11 @@ class MultiScaleTrendLoss(nn.Module):
         self.weights = weights
         self.reduction = reduction
 
-    def _ema(self, x: torch.Tensor, dim: int, alpha: float) -> torch.Tensor:
-        """Compute Exponential Moving Average (EMA) along a specified dimension."""
-        ema = torch.empty_like(x)
-        ema.select(dim, 0).copy_(x.select(dim, 0))
-        for i in range(1, x.size(dim)):
-            prev = ema.select(dim, i - 1)
-            cur = x.select(dim, i)
-            ema.select(dim, i).copy_(alpha * cur + (1 - alpha) * prev)
-        return ema
-
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         losses = []
         for alpha, weight in zip(self.alphas, self.weights):
-            pred_ema = self._ema(pred, dim=1, alpha=alpha)
-            target_ema = self._ema(target, dim=1, alpha=alpha)
+            pred_ema = ema(pred, dim=1, alpha=alpha)
+            target_ema = ema(target, dim=1, alpha=alpha)
             mse = (pred_ema - target_ema).pow(2).mean(dim=1)        # [B]
             losses.append(weight * mse)
         loss = torch.stack(losses, dim=0).sum(dim=0)                # [B]
@@ -52,7 +44,7 @@ class MultiScaleTrendDirectionLoss(nn.Module):
                  huber_margin: float,
                  softness: float,
                  norm_eps: float):
-        if (len(alphas) != len(weights)):
+        if len(alphas) != len(weights):
             raise ValueError("alphas and weights must have the same length.")
         super().__init__()
 
@@ -63,16 +55,6 @@ class MultiScaleTrendDirectionLoss(nn.Module):
         self.huber_margin = huber_margin
         self.softness = softness
         self.norm_eps = norm_eps
-
-    def _ema(self, x: torch.Tensor, dim: int, alpha: float) -> torch.Tensor:
-        """Compute Exponential Moving Average (EMA) along a specified dimension."""
-        ema = torch.empty_like(x)
-        ema.select(dim, 0).copy_(x.select(dim, 0))
-        for i in range(1, x.size(dim)):
-            prev = ema.select(dim, i - 1)
-            cur = x.select(dim, i)
-            ema.select(dim, i).copy_(alpha * cur + (1 - alpha) * prev)
-        return ema
 
     def _hinge_loss(self,
                     pred_delta: torch.Tensor,      # [B, S-1]
@@ -130,8 +112,8 @@ class MultiScaleTrendDirectionLoss(nn.Module):
         """
         losses = []  # will hold [B] tensors
         for alpha, weight in zip(self.alphas, self.weights):
-            pred_ema = self._ema(pred, dim=1, alpha=alpha)      # [B, S]
-            target_ema = self._ema(target, dim=1, alpha=alpha)  # [B, S]
+            pred_ema = ema(pred, dim=1, alpha=alpha)      # [B, S]
+            target_ema = ema(target, dim=1, alpha=alpha)  # [B, S]
 
             # First differences
             pred_delta = pred_ema[:, 1:] - pred_ema[:, :-1]        # [B, S-1]
