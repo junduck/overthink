@@ -14,6 +14,7 @@ class TemporalMixBlock(nn.Module):
     def __init__(self,
                  time_horizon: int,
                  expansion_factor: float,
+                 dropout: float,
                  eps: float,
                  dtype: torch.dtype = torch.float32):
         super().__init__()
@@ -22,12 +23,14 @@ class TemporalMixBlock(nn.Module):
         self.mix = SwiGLU(hidden_size=time_horizon,
                           expansion_factor=expansion_factor,
                           dtype=dtype)
+        self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x is [B, S, Hidden] we need [B, Hidden, S] for temporal mixing
         x = rearrange(x, 'b s h -> b h s')
         x = x + self.mix(rms_norm(x, eps=self.eps))
         x = rearrange(x, 'b h s -> b s h')
+        x = self.dropout(x)
         return x
 
 
@@ -48,6 +51,7 @@ class TemporalMixStack(nn.Module):
                  hidden_size: int,
                  time_horizon: int,
                  expansion_factor: float,
+                 dropout: float,
                  eps: float,
                  dtype: torch.dtype = torch.float32):
         super().__init__()
@@ -55,6 +59,7 @@ class TemporalMixStack(nn.Module):
             TemporalMixBlock(
                 time_horizon=time_horizon,
                 expansion_factor=expansion_factor,
+                dropout=dropout,
                 eps=eps,
                 dtype=dtype,
             ) for _ in range(layer_num)
