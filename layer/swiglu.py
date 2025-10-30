@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 from .linear import Linear
 
@@ -32,4 +33,10 @@ class SwiGLU(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         gate, up = self.gate_up(x).chunk(2, dim=-1)
-        return self.down(torch.nn.functional.silu(gate) * up)
+        return self.down(F.silu(gate) * up)
+
+
+class LightweightGate(nn.Module):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x, gate = x.chunk(2, dim=-1)
+        return x * F.silu(gate)
