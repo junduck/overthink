@@ -3,27 +3,28 @@ from typing import Literal
 import torch
 from torch import nn
 
-from layer.utils import ema
+from layer.utils import ema_running
 
 
 class MultiScaleTrendLoss(nn.Module):
     def __init__(self,
-                 alphas: list[float],
+                 ema_periods: list[int],
                  weights: list[float],
                  reduction: Literal["mean", "sum", "none"] = "mean"):
-        if len(alphas) != len(weights):
-            raise ValueError("alphas and weights must have the same length.")
+        if len(ema_periods) != len(weights):
+            raise ValueError(
+                "ema_periods and weights must have the same length.")
         super().__init__()
 
-        self.alphas = alphas
+        self.ema_periods = ema_periods
         self.weights = weights
         self.reduction = reduction
 
     def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         losses = []
-        for alpha, weight in zip(self.alphas, self.weights):
-            pred_ema = ema(pred, dim=1, alpha=alpha)
-            target_ema = ema(target, dim=1, alpha=alpha)
+        for ema_period, weight in zip(self.ema_periods, self.weights):
+            pred_ema = ema_running(pred, dim=1, period=ema_period)
+            target_ema = ema_running(target, dim=1, period=ema_period)
             mse = (pred_ema - target_ema).pow(2).mean(dim=1)        # [B]
             losses.append(weight * mse)
         loss = torch.stack(losses, dim=0).sum(dim=0)                # [B]
@@ -37,18 +38,19 @@ class MultiScaleTrendLoss(nn.Module):
 
 class MultiScaleTrendDirectionLoss(nn.Module):
     def __init__(self,
-                 alphas: list[float],
+                 ema_periods: list[int],
                  weights: list[float],
                  reduction: Literal["mean", "sum", "none"],
                  loss_type: Literal["hinge", "huber", "cosine", "softsign"],
                  huber_margin: float,
                  softness: float,
                  norm_eps: float):
-        if len(alphas) != len(weights):
-            raise ValueError("alphas and weights must have the same length.")
+        if len(ema_periods) != len(weights):
+            raise ValueError(
+                "ema_periods and weights must have the same length.")
         super().__init__()
 
-        self.alphas = alphas
+        self.ema_periods = ema_periods
         self.weights = weights
         self.reduction = reduction
         self.loss_type = loss_type
@@ -111,9 +113,11 @@ class MultiScaleTrendDirectionLoss(nn.Module):
             scalar if reduction='mean'/'sum', [B] if reduction='none'
         """
         losses = []  # will hold [B] tensors
-        for alpha, weight in zip(self.alphas, self.weights):
-            pred_ema = ema(pred, dim=1, alpha=alpha)      # [B, S]
-            target_ema = ema(target, dim=1, alpha=alpha)  # [B, S]
+        for ema_period, weight in zip(self.ema_periods, self.weights):
+            pred_ema = ema_running(
+                pred, dim=1, period=ema_period)      # [B, S]
+            target_ema = ema_running(
+                target, dim=1, period=ema_period)  # [B, S]
 
             # First differences
             pred_delta = pred_ema[:, 1:] - pred_ema[:, :-1]        # [B, S-1]

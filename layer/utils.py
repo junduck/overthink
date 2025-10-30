@@ -131,3 +131,27 @@ def ema(x: torch.Tensor, dim: int, period: int) -> torch.Tensor:
         result.add_(cur - result, alpha=alpha)
 
     return result.unsqueeze(dim)
+
+
+def ema_running(x: torch.Tensor, dim: int, period: int) -> torch.Tensor:
+    if period <= 0:
+        raise ValueError(f"Period must be positive, got {period}")
+
+    # Financial convention: alpha = 2 / (period + 1)
+    alpha = 2.0 / (period + 1)
+
+    # Create output tensor with same shape as input
+    result = torch.empty_like(x)
+
+    # Initialize with first value along the dimension
+    ema_state = x.select(dim, 0).clone()
+    result.select(dim, 0).copy_(ema_state)
+
+    # Compute running EMA for remaining positions
+    for i in range(1, x.size(dim)):
+        cur = x.select(dim, i)
+        # EMA[t] = alpha * x[t] + (1 - alpha) * EMA[t-1]
+        ema_state.add_(cur - ema_state, alpha=alpha)
+        result.select(dim, i).copy_(ema_state)
+
+    return result
