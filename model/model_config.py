@@ -66,6 +66,10 @@ class ModelConfig(BaseModel):
     batch_size: int = Field(description="Batch size for training")
 
     # Overthink Model
+    temporal_mechanism: Literal["attention", "mixing"] = Field(
+        default="attention",
+        description="Mechanism for temporal mixing in the model"
+    )
     high_freq_step: int = Field(
         description="Number of high frequency reasoning steps per low frequency step")
     low_freq_step: int = Field(
@@ -88,6 +92,9 @@ class ModelConfig(BaseModel):
     attn_dropout: float = Field(
         default=0.0,
         description="Dropout rate for attention weights")
+    mixing_dropout: float = Field(
+        default=0.1,
+        description="Dropout rate for mixing layers")
 
     # RoPE
     rope_theta: float = Field(

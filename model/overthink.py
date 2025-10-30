@@ -5,7 +5,7 @@ import torch
 from einops import repeat
 from torch import nn
 
-from block import TransBlock, TransStack, AutoregressiveHead, FiLMBlock
+from block import TransBlock, TransStack, AutoregressiveHead, FiLMBlock, TemporalMixStack
 from layer import Linear, RoPE, SwiGLU
 from layer.utils import get_torch_dtype
 
@@ -53,19 +53,31 @@ class OverthinkModel(nn.Module):
         else:
             self.modulation = None
 
-        self.high_freq_reasoning = TransStack(
-            layer_num=config.hidden_layer_num,
-            hidden_size=config.hidden_size,
-            head_num=config.head_num,
-            dropout=config.attn_dropout,
-            causal=config.decoder_only or config.use_causal,
-            expansion_factor=config.expansion_factor,
-            eps=config.rms_eps,
-            rope=self.rope if config.use_rope else None,
-            dtype=dtype,
-        )
+        self.temporal_mix = None
+        if config.temporal_mechanism == "attention":
+            self.temporal_mix = TransStack(
+                layer_num=config.hidden_layer_num,
+                hidden_size=config.hidden_size,
+                head_num=config.head_num,
+                dropout=config.attn_dropout,
+                causal=config.decoder_only or config.use_causal,
+                expansion_factor=config.expansion_factor,
+                eps=config.rms_eps,
+                rope=self.rope if config.use_rope else None,
+                dtype=dtype,
+            )
+        else:
+            self.temporal_mix = TemporalMixStack(
+                layer_num=config.hidden_layer_num,
+                hidden_size=config.hidden_size,
+                time_horizon=config.lookback_horizon,
+                expansion_factor=config.expansion_factor,
+                dropout=config.mixing_dropout,
+                eps=config.rms_eps,
+                dtype=dtype,
+            )
 
-        self.low_freq_reasoning = TransBlock(
+        self.attention = TransBlock(
             hidden_size=config.hidden_size,
             head_num=config.head_num,
             dropout=config.attn_dropout,
@@ -126,17 +138,18 @@ class OverthinkModel(nn.Module):
         Returns:
             Updated high frequency and low frequency tensors.
         """
+        assert self.temporal_mix is not None
         with torch.no_grad():
             for _ in range(self.config.low_freq_step - 1):
                 res_h = low_freq + residual
                 for _ in range(self.config.high_freq_step):
-                    high_freq = self.high_freq_reasoning(high_freq, res_h)
-                low_freq = self.low_freq_reasoning(low_freq + high_freq)
+                    high_freq = self.temporal_mix(high_freq, res_h)
+                low_freq = self.attention(low_freq + high_freq)
 
         res_h = low_freq + residual
         for _ in range(self.config.high_freq_step):
-            high_freq = self.high_freq_reasoning(high_freq, res_h)
-        low_freq = self.low_freq_reasoning(low_freq + high_freq)
+            high_freq = self.temporal_mix(high_freq, res_h)
+        low_freq = self.attention(low_freq + high_freq)
 
         return high_freq, low_freq
 
