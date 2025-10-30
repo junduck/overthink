@@ -31,12 +31,14 @@ class SwiGLU(nn.Module):
         self.down = Linear(in_features=I,
                            out_features=hidden_size, bias=False, dtype=dtype)
 
+    @torch.compile
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         gate, up = self.gate_up(x).chunk(2, dim=-1)
         return self.down(F.silu(gate) * up)
 
 
 class LightweightGate(nn.Module):
+    @torch.compile
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x, gate = x.chunk(2, dim=-1)
         return x * F.silu(gate)
