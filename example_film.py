@@ -363,7 +363,6 @@ def main():
         lookback_horizon=40,
         forecast_horizon=20,
         batch_size=128,
-        temporal_mechanism="mixing",
         high_freq_step=3,
         low_freq_step=2,
         hidden_layer_num=2,

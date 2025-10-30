@@ -67,14 +67,8 @@ class OverthinkModel(nn.Module):
                 dtype=dtype,
             )
         else:
-            self.temporal_mix = TemporalMixStack(
-                layer_num=config.hidden_layer_num,
-                hidden_size=config.hidden_size,
-                time_horizon=config.lookback_horizon,
-                expansion_factor=config.expansion_factor,
-                dropout=config.mixing_dropout,
-                eps=config.rms_eps,
-                dtype=dtype,
+            raise NotImplementedError(
+                f"Temporal mechanism {config.temporal_mechanism} not implemented."
             )
 
         self.attention = TransBlock(

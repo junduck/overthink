@@ -66,7 +66,7 @@ class ModelConfig(BaseModel):
     batch_size: int = Field(description="Batch size for training")
 
     # Overthink Model
-    temporal_mechanism: Literal["attention", "mixing"] = Field(
+    temporal_mechanism: Literal["attention"] = Field(
         default="attention",
         description="Mechanism for temporal mixing in the model"
     )
