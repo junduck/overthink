@@ -42,11 +42,11 @@ flowchart TD
     FiLMMod --> InitStates[Initialize Reasoning States<br/>High Freq & Low Freq<br/>for each AR step]
     NoFiLM --> InitStates
 
-    InitStates --> LoopStart{Low Frequency<br/>Iteration<br/>low_freq_step times}
+    InitStates --> LoopStart{Deep Reasoning loop}
 
     LoopStart -->|Iterate| ResH[res_h = low_freq + residual]
 
-    ResH --> HFLoop{High Frequency<br/>Iteration<br/>high_freq_step times}
+    ResH --> HFLoop{Temporal Mixing}
 
     HFLoop -->|Iterate| HFReasoning[High Freq Reasoning<br/>TransStack/TemporalMixStack<br/>+ residual]
     HFReasoning -->|Update high_freq| HFLoop
