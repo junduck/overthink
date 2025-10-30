@@ -64,45 +64,70 @@ def rms_norm(x: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
     return x.to(orig)
 
 
-def ema_weights(decay: float, length: int, dtype: torch.dtype = torch.float32) -> torch.Tensor:
+def ema_weights(period: int, length: int, dtype: torch.dtype = torch.float32) -> torch.Tensor:
     """Generate EMA weights
 
     Args:
-        decay: Decay rate for EMA (0 < decay < 1). Higher values give more weight to recent timesteps.
+        period: EMA period (e.g., 10 for 10-period EMA). Higher values = more smoothing.
         length: Length of the sequence (number of timesteps).
         dtype: Data type for the weights (default: torch.float32).
 
     Returns:
         EMA weights tensor of shape [length] that sums to 1.
+        More recent timesteps have higher weights.
 
     Example:
-        >>> weights = ema_weights(decay=0.1, length=5)
+        >>> weights = ema_weights(period=10, length=5)
         >>> print(weights.shape)  # torch.Size([5])
         >>> print(weights.sum())  # tensor(1.)
     """
-    if not 0 < decay < 1:
-        raise ValueError(f"Decay must be between 0 and 1, got {decay}")
+    if period <= 0:
+        raise ValueError(f"Period must be positive, got {period}")
     if length <= 0:
         raise ValueError(f"Length must be positive, got {length}")
 
-    decay_factors = torch.cumprod(
-        torch.full((length,), 1.0 - decay, dtype=torch.float32),
-        dim=0
-    )
+    # Financial convention: alpha = 2 / (period + 1)
+    alpha = 2.0 / (period + 1)
+
+    # Generate decay factors: (1-alpha)^0, (1-alpha)^1, (1-alpha)^2, ...
+    indices = torch.arange(length, dtype=torch.float32)
+    decay_factors = (1.0 - alpha) ** indices
+
     # Reverse to give more weight to recent timesteps
     decay_factors = torch.flip(decay_factors, [0])
+
     # Normalize to sum to 1
-    w = (decay_factors / decay_factors.sum()).view(-1).to(dtype=dtype)
+    w = (decay_factors / decay_factors.sum()).to(dtype=dtype)
 
     return w
 
 
-def ema(x: torch.Tensor, dim: int, alpha: float) -> torch.Tensor:
-    """Compute Exponential Moving Average (EMA) along a specified dimension."""
-    m = torch.empty_like(x)
-    m.select(dim, 0).copy_(x.select(dim, 0))
+def ema(x: torch.Tensor, dim: int, period: int) -> torch.Tensor:
+    """Compute final EMA value along a specified dimension.
+
+    Args:
+        x: Input tensor
+        dim: Dimension along which to compute EMA
+        period: EMA period (e.g., 10 for 10-period EMA). Higher values = more smoothing.
+                Uses financial convention: alpha = 2 / (period + 1) ~ responsiveness SMA(period)
+
+    Returns:
+        Final EMA value with dimension `dim` having size 1.
+
+    Example:
+        >>> x = torch.randn(2, 100, 512)  # [B, S, Hidden]
+        >>> result = ema(x, dim=1, period=10)  # [B, 1, Hidden]
+    """
+    if period <= 0:
+        raise ValueError(f"Period must be positive, got {period}")
+
+    # Financial convention: alpha = 2 / (period + 1)
+    alpha = 2.0 / (period + 1)
+
+    result = x.select(dim, 0).clone()
     for i in range(1, x.size(dim)):
-        prev = m.select(dim, i - 1)
         cur = x.select(dim, i)
-        m.select(dim, i).copy_(prev + alpha * (cur - prev))
-    return m
+        # EMA[t] = alpha * x[t] + (1 - alpha) * EMA[t-1]
+        result.add_(cur - result, alpha=alpha)
+
+    return result.unsqueeze(dim)

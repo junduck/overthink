@@ -5,7 +5,7 @@ import torch
 from torch import nn
 
 from layer import Linear
-from layer.utils import ema_weights
+from layer.utils import ema_weights, ema
 
 
 class AutoregressiveHead(nn.Module):
@@ -19,7 +19,7 @@ class AutoregressiveHead(nn.Module):
                  lookback_horizon: int,
                  feature_num: int,
                  aggregation: Literal['mean', 'ema', 'last'],
-                 ema_decay: float,
+                 ema_period: int = 0,
                  delta_scale: float = 0.1,
                  learnable_delta_scale: bool = False,
                  dtype: torch.dtype = torch.float32):
@@ -41,8 +41,10 @@ class AutoregressiveHead(nn.Module):
             self.delta_proj.w.mul_(scale)
             self.delta_proj.b.zero_()  # type: ignore
 
+        self.lookback = lookback_horizon
+        self.ema_period = ema_period
         if aggregation == "ema":
-            ema_w = ema_weights(decay=ema_decay,
+            ema_w = ema_weights(period=ema_period,
                                 length=lookback_horizon,
                                 dtype=dtype).view(1, -1, 1)
             self.register_buffer("ema_weights", ema_w, persistent=False)
@@ -57,7 +59,12 @@ class AutoregressiveHead(nn.Module):
         if self.aggregation == 'mean':
             agg = x.mean(dim=1)
         elif self.aggregation == 'ema':
-            agg = (x * self.ema_weights).sum(dim=1)  # type: ignore
+            # Check if S matches lookback
+            if x.size(1) == self.lookback:
+                agg = (x * self.ema_weights).sum(dim=1)  # type: ignore
+            else:
+                # we have different sequence length during inference, calculate ema in-place
+                agg = ema(x, dim=1, period=self.ema_period)
         else:
             agg = x[:, -1, :]
 
@@ -91,12 +98,14 @@ class DirectForecastHead(nn.Module):
                  feature_num: int,
                  forecast_horizon: int,
                  aggregation: Literal['mean', 'ema', 'last'],
-                 ema_decay: float,
+                 ema_period: int = 0,
                  dtype: torch.dtype = torch.float32):
         super().__init__()
 
         self.forecast_horizon = forecast_horizon
         self.feature_num = feature_num
+        self.lookback = lookback_horizon
+        self.ema_period = ema_period
 
         # Predict all future steps at once
         self.forecast_proj = Linear(
@@ -113,7 +122,7 @@ class DirectForecastHead(nn.Module):
             self.forecast_proj.b.zero_()  # type: ignore
 
         if aggregation == "ema":
-            ema_w = ema_weights(decay=ema_decay,
+            ema_w = ema_weights(period=ema_period,
                                 length=lookback_horizon,
                                 dtype=dtype).view(1, -1, 1)
             self.register_buffer("ema_weights", ema_w, persistent=False)
@@ -127,7 +136,12 @@ class DirectForecastHead(nn.Module):
         if self.aggregation == 'mean':
             agg = x.mean(dim=1)  # [B, hidden_size]
         elif self.aggregation == 'ema':
-            agg = (x * self.ema_weights).sum(dim=1)  # type: ignore
+            # Check if S matches lookback
+            if x.size(1) == self.lookback:
+                agg = (x * self.ema_weights).sum(dim=1)  # type: ignore
+            else:
+                # we have different sequence length during inference, calculate ema in-place
+                agg = ema(x, dim=1, period=self.ema_period)
         else:  # 'last'
             agg = x[:, -1, :]  # [B, hidden_size]
 
