@@ -154,3 +154,7 @@ Some other mechanisms employed to improve stock market forecasting performance i
 - `example.py`: Basic usage example without FiLM conditioning
 - `example_film.py`: Example with FiLM conditioning
 - `example.ipynb`: Jupyter notebook example for interactive exploration
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
