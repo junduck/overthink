@@ -1,5 +1,5 @@
 from typing import Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ModelConfig(BaseModel):
@@ -29,6 +29,38 @@ class ModelConfig(BaseModel):
     decoder_only: bool = Field(
         default=True,
         description="Whether to use a decoder-only architecture")
+
+    # Feature-wise Linear Modulation
+    use_film: bool = Field(
+        default=False,
+        description="Whether to use FiLM conditioning"
+    )
+    film_feature_num: int | None = Field(
+        default=None,
+        description="Number of features for FiLM conditioning"
+    )
+    film_hidden_size: int | None = Field(
+        default=None,
+        description="Hidden size for FiLM MLP"
+    )
+    film_dropout: float | None = Field(
+        default=None,
+        description="Dropout rate for FiLM MLP"
+    )
+
+    @model_validator(mode="after")
+    def validate_film_config(self):
+        if self.use_film:
+            if self.film_feature_num is None:
+                raise ValueError(
+                    "film_feature_num must be set when use_film is True.")
+            if self.film_hidden_size is None:
+                raise ValueError(
+                    "film_hidden_size must be set when use_film is True.")
+            if self.film_dropout is None:
+                raise ValueError(
+                    "film_dropout must be set when use_film is True.")
+        return self
 
     # Batch
     batch_size: int = Field(description="Batch size for training")
@@ -74,9 +106,9 @@ class ModelConfig(BaseModel):
     forecast_aggregation: Literal['mean', 'ema', 'last'] = Field(
         default='mean',
         description="Aggregation method for multi-step forecast outputs")
-    forecast_ema_decay: float = Field(
-        default=0.1,
-        description="EMA decay rate for smoothing forecast outputs")
+    forecast_ema_period: int = Field(
+        default=0,
+        description="EMA period for smoothing forecast outputs")
     forecast_residual_scale: float = Field(
         default=0.05,
         description="Scaling factor for residual connection in forecast head")
