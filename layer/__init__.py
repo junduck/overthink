@@ -1,4 +1,4 @@
-from .attention import Attention, LinearAttention
+from .attention import Attention, LinearAttention, GQAttention
 from .embed import Embed
 from .linear import Linear
 from .rope import RoPE
@@ -9,6 +9,7 @@ from .rms import RMSNorm, RevIN
 __all__ = [
     "Attention",
     "LinearAttention",
+    "GQAttention",
     "Embed",
     "Linear",
     "RoPE",

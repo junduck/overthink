@@ -82,6 +82,10 @@ class ModelConfig(BaseModel):
         description="Hidden dimension size for transformer blocks")
     head_num: int = Field(
         description="Number of attention heads in transformer blocks")
+    query_group: int = Field(
+        default=0,
+        description="Number of query group for Grouped Query Attention"
+    )
     use_causal: bool = Field(
         description="Whether to use causal masking in attention")
     use_rope: bool = Field(

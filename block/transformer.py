@@ -3,7 +3,7 @@ from typing import Optional
 import torch
 from torch import nn
 
-from layer import Attention, RoPE, SwiGLU
+from layer import Attention, GQAttention, RoPE, SwiGLU
 from layer.utils import rms_norm
 
 
@@ -15,6 +15,7 @@ class TransBlock(nn.Module):
     Args:
         hidden_size: Hidden dimension size
         head_num: Number of attention heads
+        query_grp: Number of grouped query
         causal: Whether to use causal masking in attention
         expansion_factor: MLP expansion factor for intermediate dimension
         eps: Epsilon for RMS normalization
@@ -25,6 +26,7 @@ class TransBlock(nn.Module):
     def __init__(self,
                  hidden_size: int,
                  head_num: int,
+                 query_grp: int,
                  dropout: float,
                  causal: bool,
                  expansion_factor: float,
@@ -36,15 +38,28 @@ class TransBlock(nn.Module):
         self.eps = eps
 
         head_dim = hidden_size // head_num
-        self.self_attn = Attention(
-            hidden_size=hidden_size,
-            head_dim=head_dim,
-            head_num=head_num,
-            dropout=dropout,
-            causal=causal,
-            rope=rope,
-            dtype=dtype
-        )
+        if query_grp == 0:
+            self.self_attn = Attention(
+                hidden_size=hidden_size,
+                head_dim=head_dim,
+                head_num=head_num,
+                dropout=dropout,
+                causal=causal,
+                rope=rope,
+                dtype=dtype
+            )
+        else:
+            self.self_attn = GQAttention(
+                hidden_size=hidden_size,
+                head_dim=head_dim,
+                head_num=head_num,
+                ngrp=query_grp,
+                dropout=dropout,
+                causal=causal,
+                rope=rope,
+                dtype=dtype
+            )
+
         self.mlp = SwiGLU(hidden_size=hidden_size,
                           expansion_factor=expansion_factor,
                           dtype=dtype)
@@ -64,6 +79,7 @@ class TransStack(nn.Module):
         layer_num: Number of transformer layers in the block
         hidden_size: Hidden dimension size
         head_num: Number of attention heads
+        query_grp: Number of grouped query
         causal: Whether to use causal masking in attention
         expansion_factor: MLP expansion factor for intermediate dimension
         eps: Epsilon for RMS normalization
@@ -75,6 +91,7 @@ class TransStack(nn.Module):
                  layer_num: int,
                  hidden_size: int,
                  head_num: int,
+                 query_grp: int,
                  dropout: float,
                  causal: bool,
                  expansion_factor: float,
@@ -86,6 +103,7 @@ class TransStack(nn.Module):
             TransBlock(
                 hidden_size=hidden_size,
                 head_num=head_num,
+                query_grp=query_grp,
                 dropout=dropout,
                 causal=causal,
                 expansion_factor=expansion_factor,

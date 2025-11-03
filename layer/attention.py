@@ -10,7 +10,7 @@ from .rope import RoPE
 
 
 class Attention(nn.Module):
-    """Multi-head attention.
+    """Multi-head attention
 
     Args:
         hidden_size: Input hidden dimension
@@ -60,7 +60,7 @@ class Attention(nn.Module):
         q = einops.rearrange(q, 'b s h d -> b h s d')
         k = einops.rearrange(k, 'b s h d -> b h s d')
         v = einops.rearrange(v, 'b s h d -> b h s d')
-        score = torch.nn.functional.scaled_dot_product_attention(
+        score = F.scaled_dot_product_attention(
             q, k, v, dropout_p=self.dropout, is_causal=self.causal)
         return self.out(einops.rearrange(score, 'b h s d -> b s (h d)'))
 
@@ -142,3 +142,91 @@ class LinearAttention(nn.Module):
         # Rearrange back to original shape and project to output
         attn_output = einops.rearrange(attn_output, 'b h s d -> b s (h d)')
         return self.out(attn_output)
+
+
+class GQAttention(nn.Module):
+    """Grouped Query Attention
+
+    Args:
+        hidden_size: Input hidden dimension
+        head_num: Number of attention heads (query heads)
+        head_dim: Dimension per attention head
+        ngrp: Number of groups (key/value heads). Must be <= head_num
+        dropout: Dropout probability (default: 0.0)
+        causal: Whether to apply causal masking (default: False)
+        rope: Optional RoPE module to apply. Pass a shared RoPE instance
+              across layers to avoid redundant cache creation (default: None)
+        dtype: Data type for parameters ('float32', 'float16', 'bfloat16')
+    """
+
+    def __init__(
+        self,
+        hidden_size: int,
+        head_num: int,
+        head_dim: int,
+        ngrp: int,
+        dropout: float = 0.0,
+        causal: bool = False,
+        rope: Optional[RoPE] = None,
+        dtype: torch.dtype = torch.float32
+    ):
+        super().__init__()
+
+        if ngrp > head_num:
+            raise ValueError(
+                f"Number of groups ({ngrp}) cannot be greater than number of heads ({head_num})")
+        if head_num % ngrp != 0:
+            raise ValueError(
+                f"Number of heads ({head_num}) must be divisible by number of groups ({ngrp})")
+
+        self.hidden_size = hidden_size
+        self.head_num = head_num
+        self.head_dim = head_dim
+        self.ngrp = ngrp
+        self.dropout = dropout
+        self.causal = causal
+        self.rope_module = rope
+
+        # Query projection: [hidden_size -> head_num * head_dim]
+        self.q_proj = Linear(in_features=hidden_size,
+                             out_features=head_dim * head_num, bias=False, dtype=dtype)
+
+        # Key and Value projections: [hidden_size -> ngrp * head_dim]
+        self.k_proj = Linear(in_features=hidden_size,
+                             out_features=head_dim * ngrp, bias=False, dtype=dtype)
+        self.v_proj = Linear(in_features=hidden_size,
+                             out_features=head_dim * ngrp, bias=False, dtype=dtype)
+
+        # Output projection: [head_num * head_dim -> hidden_size]
+        self.out = Linear(in_features=head_dim * head_num,
+                          out_features=hidden_size, bias=False, dtype=dtype)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        q = self.q_proj(x)  # [B, S, head_num * head_dim]
+        k = self.k_proj(x)  # [B, S, ngrp * head_dim]
+        v = self.v_proj(x)  # [B, S, ngrp * head_dim]
+
+        # rearrange for multi-head attention
+        q = einops.rearrange(q, 'b s (h h2) -> b s h h2',
+                             h=self.head_num, h2=self.head_dim)
+        k = einops.rearrange(k, 'b s (g h) -> b s g h',
+                             g=self.ngrp, h=self.head_dim)
+        v = einops.rearrange(v, 'b s (g h) -> b s g h',
+                             g=self.ngrp, h=self.head_dim)
+
+        # Apply RoPE if enabled on q and k
+        if self.rope_module is not None:
+            q, k = self.rope_module(q, k)
+
+        # Rearrange for flash attention
+        heads_per_group = self.head_num // self.ngrp
+        q = einops.rearrange(q, 'b s h d -> b h s d')  # [B, head, S, head]
+        k = einops.rearrange(k, 'b s h d -> b h s d')  # [B, ngrp, S, head_dim]
+        v = einops.rearrange(v, 'b s h d -> b h s d')  # [B, ngrp, S, head_dim]
+        k = einops.repeat(k, 'b g s d -> b (g h) s d', h=heads_per_group)
+        v = einops.repeat(v, 'b g s d -> b (g h) s d', h=heads_per_group)
+
+        score = F.scaled_dot_product_attention(
+            q, k, v, dropout_p=self.dropout, is_causal=self.causal)
+
+        return self.out(einops.rearrange(score, 'b h s d -> b s (h d)'))

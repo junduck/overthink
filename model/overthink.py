@@ -5,7 +5,7 @@ import torch
 from einops import repeat
 from torch import nn
 
-from block import TransBlock, TransStack, AutoregressiveHead, FiLMBlock, TemporalMixStack
+from block import TransBlock, TransStack, AutoregressiveHead, FiLMBlock
 from layer import Linear, RoPE, SwiGLU
 from layer.utils import get_torch_dtype
 
@@ -59,6 +59,7 @@ class OverthinkModel(nn.Module):
                 layer_num=config.hidden_layer_num,
                 hidden_size=config.hidden_size,
                 head_num=config.head_num,
+                query_grp=config.query_group,
                 dropout=config.attn_dropout,
                 causal=config.decoder_only or config.use_causal,
                 expansion_factor=config.expansion_factor,
@@ -74,6 +75,7 @@ class OverthinkModel(nn.Module):
         self.attention = TransBlock(
             hidden_size=config.hidden_size,
             head_num=config.head_num,
+            query_grp=config.query_group,
             dropout=config.attn_dropout,
             causal=config.decoder_only,
             expansion_factor=config.expansion_factor,
