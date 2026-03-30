@@ -1,0 +1,38 @@
+{
+  "data": {
+    "db_path": "example_data/ts_daily_token.db",
+    "context_len": 20,
+    "pred_horizon": 2,
+    "min_tokens": 22,
+    "overlap": true,
+    "clip_percentile": 99.0,
+    "train_ratio": 0.8,
+    "val_ratio": 0.1,
+    "batch_strategy": "mixed_stock",
+    "batch_size": 32
+  },
+  "train": {
+    "lr": 0.001,
+    "epochs": 50,
+    "tf_ratio_start": 0.8,
+    "tf_ratio_end": 0.1,
+    "loss_weights": [
+      1.0,
+      0.3
+    ],
+    "ckpt_path": "checkpoints",
+    "dry_run": false
+  },
+  "model": {
+    "hidden_size": 64,
+    "head_num": 4,
+    "query_group": 0,
+    "hidden_layer_num": 3,
+    "expansion_factor": 2.0,
+    "local_reason_step": 2,
+    "global_reason_step": 2,
+    "use_causal": true,
+    "use_rope": true,
+    "rope_max_seq_len": 512
+  }
+}

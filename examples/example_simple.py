@@ -1,7 +1,6 @@
 """Example script demonstrating OverthinkSimple for time series forecasting."""
 
 import torch
-import torch.nn as nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
 import numpy as np
@@ -75,7 +74,6 @@ def main():
     print("\n2. Training...")
     model = OverthinkSimple(config)
     optimizer = optim.AdamW(model.parameters(), lr=0.001)
-    criterion = nn.MSELoss()
 
     horizon = 10
     num_epochs = 30
@@ -89,28 +87,11 @@ def main():
 
         epoch_loss = 0.0
         for i in range(0, X_train.size(0), 64):
-            optimizer.zero_grad()
+            loss = model.train_step(
+                X_train[i : i + 32], y_train[i : i + 32], optimizer, tf_ratio
+            )
+            epoch_loss += loss
 
-            # Teacher forcing: use ground truth for next step
-            current_seq = X_train[i : i + 32]
-            preds = []
-            for t in range(horizon):
-                if torch.rand(1).item() < tf_ratio and t > 0:
-                    next_val = preds[-1]
-                else:
-                    next_val = y_train[i : i + 32, t : t + 1, :]
-                pred = model(current_seq)
-                preds.append(pred)
-                current_seq = torch.cat([current_seq, next_val], dim=1)
-
-            preds_tensor = torch.cat(preds, dim=1)  # [B, horizon, F]
-            loss = criterion(preds_tensor, y_train[i : i + 32])
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
-            epoch_loss += loss.item()
-
-        # Decay teacher forcing ratio
         tf_ratio = max(0.1, tf_ratio * 0.99)
 
         if (epoch + 1) % 10 == 0:
@@ -122,7 +103,7 @@ def main():
     model.eval()
     with torch.no_grad():
         test_preds = model.autoregressive_generate(X_test[:4], horizon=10)
-        test_loss = nn.MSELoss()(test_preds[:, -10:, :], y_test[:4])
+        test_loss = torch.nn.functional.mse_loss(test_preds[:, -10:, :], y_test[:4])
         print(f"   Test MSE: {test_loss.item():.6f}")
 
     print("\n4. Plotting results...")

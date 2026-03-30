@@ -162,3 +162,56 @@ class OverthinkSimple(nn.Module):
             current_seq = torch.cat([current_seq, next_val], dim=1)
 
         return current_seq
+
+    def train_step(
+        self,
+        input_seq: torch.Tensor,
+        target_seq: torch.Tensor,
+        optimizer: torch.optim.Optimizer,
+        tf_ratio: float = 0.8,
+        loss_weights: list[float] | None = None,
+    ) -> float:
+        """Single training step with teacher forcing.
+
+        Args:
+            input_seq: Input sequence [B, S, feature_num]
+            target_seq: Target sequence [B, H, feature_num]
+            optimizer: Optimizer to use
+            tf_ratio: Teacher forcing ratio
+            loss_weights: Weight for each prediction step. If None, uses equal weights.
+
+        Returns:
+            Loss value
+        """
+        self.train()
+        optimizer.zero_grad()
+
+        horizon = target_seq.size(1)
+        context = input_seq
+        preds = []
+
+        for t in range(horizon):
+            if torch.rand(1).item() < tf_ratio and t > 0:
+                next_val = preds[-1]
+            else:
+                next_val = target_seq[:, t : t + 1, :]
+            pred = self.forward(context)
+            preds.append(pred)
+            context = torch.cat([context, next_val], dim=1)
+
+        preds_tensor = torch.cat(preds, dim=1)
+
+        if loss_weights is None:
+            loss = torch.nn.functional.mse_loss(preds_tensor, target_seq)
+        else:
+            loss = torch.tensor(0.0, device=input_seq.device)
+            for t, w in enumerate(loss_weights):
+                loss = loss + w * torch.nn.functional.mse_loss(
+                    preds_tensor[:, t, :], target_seq[:, t, :]
+                )
+
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
+        optimizer.step()
+
+        return loss.item()
