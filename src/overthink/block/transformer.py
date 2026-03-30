@@ -3,8 +3,8 @@ from typing import Optional
 import torch
 from torch import nn
 
-from layer import Attention, GQAttention, RoPE, SwiGLU
-from layer.utils import rms_norm
+from overthink.layer import Attention, GQAttention, RoPE, SwiGLU
+from overthink.layer.utils import rms_norm
 
 
 class TransBlock(nn.Module):
@@ -23,16 +23,18 @@ class TransBlock(nn.Module):
         dtype: Data type for parameters ('float32', 'float16', 'bfloat16')
     """
 
-    def __init__(self,
-                 hidden_size: int,
-                 head_num: int,
-                 query_grp: int,
-                 dropout: float,
-                 causal: bool,
-                 expansion_factor: float,
-                 eps: float,
-                 rope: Optional[RoPE] = None,
-                 dtype: torch.dtype = torch.float32):
+    def __init__(
+        self,
+        hidden_size: int,
+        head_num: int,
+        query_grp: int,
+        dropout: float,
+        causal: bool,
+        expansion_factor: float,
+        eps: float,
+        rope: Optional[RoPE] = None,
+        dtype: torch.dtype = torch.float32,
+    ):
         super().__init__()
 
         self.eps = eps
@@ -46,7 +48,7 @@ class TransBlock(nn.Module):
                 dropout=dropout,
                 causal=causal,
                 rope=rope,
-                dtype=dtype
+                dtype=dtype,
             )
         else:
             self.self_attn = GQAttention(
@@ -57,12 +59,12 @@ class TransBlock(nn.Module):
                 dropout=dropout,
                 causal=causal,
                 rope=rope,
-                dtype=dtype
+                dtype=dtype,
             )
 
-        self.mlp = SwiGLU(hidden_size=hidden_size,
-                          expansion_factor=expansion_factor,
-                          dtype=dtype)
+        self.mlp = SwiGLU(
+            hidden_size=hidden_size, expansion_factor=expansion_factor, dtype=dtype
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x + self.self_attn(rms_norm(x, eps=self.eps))
@@ -87,31 +89,36 @@ class TransStack(nn.Module):
         dtype: Data type for parameters ('float32', 'float16', 'bfloat16')
     """
 
-    def __init__(self,
-                 layer_num: int,
-                 hidden_size: int,
-                 head_num: int,
-                 query_grp: int,
-                 dropout: float,
-                 causal: bool,
-                 expansion_factor: float,
-                 eps: float,
-                 rope: Optional[RoPE] = None,
-                 dtype: torch.dtype = torch.float32):
+    def __init__(
+        self,
+        layer_num: int,
+        hidden_size: int,
+        head_num: int,
+        query_grp: int,
+        dropout: float,
+        causal: bool,
+        expansion_factor: float,
+        eps: float,
+        rope: Optional[RoPE] = None,
+        dtype: torch.dtype = torch.float32,
+    ):
         super().__init__()
-        self.layers = nn.ModuleList([
-            TransBlock(
-                hidden_size=hidden_size,
-                head_num=head_num,
-                query_grp=query_grp,
-                dropout=dropout,
-                causal=causal,
-                expansion_factor=expansion_factor,
-                eps=eps,
-                rope=rope,
-                dtype=dtype,
-            ) for _ in range(layer_num)
-        ])
+        self.layers = nn.ModuleList(
+            [
+                TransBlock(
+                    hidden_size=hidden_size,
+                    head_num=head_num,
+                    query_grp=query_grp,
+                    dropout=dropout,
+                    causal=causal,
+                    expansion_factor=expansion_factor,
+                    eps=eps,
+                    rope=rope,
+                    dtype=dtype,
+                )
+                for _ in range(layer_num)
+            ]
+        )
 
     def forward(self, x: torch.Tensor, residual: torch.Tensor) -> torch.Tensor:
         hidden = x + residual

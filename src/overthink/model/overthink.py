@@ -5,9 +5,9 @@ import torch
 from einops import repeat
 from torch import nn
 
-from block import TransBlock, TransStack, AutoregressiveHead, FiLMBlock
-from layer import Linear, RoPE, SwiGLU
-from layer.utils import get_torch_dtype
+from overthink.block import TransBlock, TransStack, AutoregressiveHead, FiLMBlock
+from overthink.layer import Linear, RoPE, SwiGLU
+from overthink.layer.utils import get_torch_dtype
 
 from .model_config import ModelConfig
 
@@ -23,23 +23,25 @@ class OverthinkModel(nn.Module):
         self.config = config
         dtype = get_torch_dtype(config.model_dtype)
 
-        self.rope = RoPE(dim=config.hidden_size // config.head_num,
-                         max_seq_len=config.rope_max_seq_len,
-                         theta=config.rope_theta,
-                         dtype=dtype)
+        self.rope = RoPE(
+            dim=config.hidden_size // config.head_num,
+            max_seq_len=config.rope_max_seq_len,
+            theta=config.rope_theta,
+            dtype=dtype,
+        )
 
         self.input_proj_linear = Linear(
             in_features=config.feature_num,
             out_features=config.hidden_size,
             bias=True,
-            dtype=dtype
+            dtype=dtype,
         )
         self.input_feat_mixing = SwiGLU(
             hidden_size=config.hidden_size,
             expansion_factor=config.expansion_factor,
-            dtype=dtype
+            dtype=dtype,
         )
-        self.input_scale = 1. / math.sqrt(config.hidden_size)
+        self.input_scale = 1.0 / math.sqrt(config.hidden_size)
         self.input_dropout = nn.Dropout(config.input_mixing_dropout)
 
         self.use_film = config.use_film
@@ -48,7 +50,7 @@ class OverthinkModel(nn.Module):
                 film_dim=config.film_feature_num,  # type: ignore
                 film_hidden_size=config.film_hidden_size,  # type: ignore
                 model_hidden_size=config.hidden_size,
-                film_dropout=config.film_dropout  # type: ignore
+                film_dropout=config.film_dropout,  # type: ignore
             )
         else:
             self.modulation = None
@@ -95,10 +97,8 @@ class OverthinkModel(nn.Module):
             dtype=dtype,
         )
 
-        self.high_freq_init = nn.Parameter(
-            torch.zeros(config.hidden_size, dtype=dtype))
-        self.low_freq_init = nn.Parameter(
-            torch.zeros(config.hidden_size, dtype=dtype))
+        self.high_freq_init = nn.Parameter(torch.zeros(config.hidden_size, dtype=dtype))
+        self.low_freq_init = nn.Parameter(torch.zeros(config.hidden_size, dtype=dtype))
 
         self.teacher_forcing = config.teacher_forcing
         self.teacher_forcing_ratio = config.teacher_forcing_ratio
@@ -120,10 +120,9 @@ class OverthinkModel(nn.Module):
         x = self.input_dropout(x)
         return x
 
-    def reasoning(self,
-                  high_freq: torch.Tensor,
-                  low_freq: torch.Tensor,
-                  residual: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def reasoning(
+        self, high_freq: torch.Tensor, low_freq: torch.Tensor, residual: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Perform one reasoning step with high and low frequency inputs.
 
         Args:
@@ -149,12 +148,13 @@ class OverthinkModel(nn.Module):
 
         return high_freq, low_freq
 
-    def forward(self,
-                input_seq: torch.Tensor,
-                film_features: Optional[torch.Tensor] = None,
-                target_seq: Optional[torch.Tensor] = None,
-                tf_ratio_overwrite: Optional[float] = None
-                ) -> torch.Tensor:
+    def forward(
+        self,
+        input_seq: torch.Tensor,
+        film_features: Optional[torch.Tensor] = None,
+        target_seq: Optional[torch.Tensor] = None,
+        tf_ratio_overwrite: Optional[float] = None,
+    ) -> torch.Tensor:
         """Autoregressive forward pass for multi-step forecasting with residual predictions.
 
         Args:
@@ -174,11 +174,13 @@ class OverthinkModel(nn.Module):
         # FiLM modulation parameters
         gamma, beta = None, None
         if self.use_film:
-            assert film_features is not None, "FiLM features must be provided when using FiLM"
+            assert film_features is not None, (
+                "FiLM features must be provided when using FiLM"
+            )
             assert self.modulation is not None
             gamma, beta = self.modulation(film_features)  # [B, D] x2
             gamma = gamma.unsqueeze(1)  # [B, 1, D]
-            beta = beta.unsqueeze(1)    # [B, 1, D]
+            beta = beta.unsqueeze(1)  # [B, 1, D]
 
         # Autoregressive loop: generate forecast_horizon steps
         for step in range(self.config.forecast_horizon):
@@ -186,16 +188,14 @@ class OverthinkModel(nn.Module):
             input_proj = self.input_projection(current_seq)  # [B, S, D]
 
             # Initialize reasoning states
-            hf_state = repeat(self.high_freq_init, 'd -> b s d',
-                              b=batch_size, s=seq_len)
-            lf_state = repeat(self.low_freq_init, 'd -> b s d',
-                              b=batch_size, s=seq_len)
+            hf_state = repeat(
+                self.high_freq_init, "d -> b s d", b=batch_size, s=seq_len
+            )
+            lf_state = repeat(self.low_freq_init, "d -> b s d", b=batch_size, s=seq_len)
 
             # Perform reasoning
             hf_state, lf_state = self.reasoning(
-                high_freq=hf_state,
-                low_freq=lf_state,
-                residual=input_proj
+                high_freq=hf_state, low_freq=lf_state, residual=input_proj
             )
 
             # Apply FiLM modulation if enabled
@@ -213,7 +213,7 @@ class OverthinkModel(nn.Module):
                     self.teacher_forcing_ratio = tf_ratio_overwrite
                 use_truth = torch.rand(1).item() < self.teacher_forcing_ratio
                 if use_truth:
-                    next_input = target_seq[:, step:step+1, :]
+                    next_input = target_seq[:, step : step + 1, :]
                 else:
                     next_input = pred
             else:

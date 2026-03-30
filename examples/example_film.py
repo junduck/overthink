@@ -15,8 +15,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 
-from model.model_config import ModelConfig
-from model.overthink import OverthinkModel
+from overthink.model.model_config import ModelConfig
+from overthink.model.overthink import OverthinkModel
 
 
 def generate_noisy_function(
@@ -51,8 +51,7 @@ def generate_noisy_function(
     signal = np.sin(t) + 0.5 * np.sin(2 * t) + 0.3 * np.sin(0.5 * t)
 
     # Create time-varying volatility (noise level)
-    volatility = base_noise_level * \
-        (1 + 0.5 * np.sin(volatility_change_freq * t))
+    volatility = base_noise_level * (1 + 0.5 * np.sin(volatility_change_freq * t))
 
     # Add time-varying noise
     noise = np.random.normal(0, 1, size=signal.shape) * volatility
@@ -65,12 +64,12 @@ def generate_noisy_function(
 
     for i in range(num_samples):
         # Historical window
-        x = data[i:i + lookback_horizon]
+        x = data[i : i + lookback_horizon]
         # Future window
-        y = data[i + lookback_horizon:i + lookback_horizon + forecast_horizon]
+        y = data[i + lookback_horizon : i + lookback_horizon + forecast_horizon]
 
         # Calculate FiLM features: upper and lower bounds in the lookback window
-        window_data = data[i:i + lookback_horizon]
+        window_data = data[i : i + lookback_horizon]
 
         # Calculate bounds using percentiles (more robust to outliers)
         # upper_bound = np.percentile(window_data, 90)  # 90th percentile
@@ -134,7 +133,9 @@ def print_layer_params(model, indent=0):
         print(f"\n{prefix}Total: {root_params:,} parameters")
 
 
-def linear_teacher_forcing_ratio(epoch, total_epochs, initial_ratio=0.8, final_ratio=0.1):
+def linear_teacher_forcing_ratio(
+    epoch, total_epochs, initial_ratio=0.8, final_ratio=0.1
+):
     """Calculate teacher forcing ratio based on training progress."""
     # Linear decay from initial_ratio to final_ratio
     progress = epoch / total_epochs
@@ -173,8 +174,7 @@ def train_model_with_film(
     num_samples = X_train.size(0)
 
     # Training loop with tqdm progress bar
-    epoch_pbar = tqdm(range(num_epochs),
-                      desc="Training with FiLM", unit="epoch")
+    epoch_pbar = tqdm(range(num_epochs), desc="Training with FiLM", unit="epoch")
 
     for epoch in epoch_pbar:
         epoch_loss = 0.0
@@ -191,13 +191,13 @@ def train_model_with_film(
             range(0, num_samples, batch_size),
             desc=f"Epoch {epoch + 1}/{num_epochs}",
             leave=False,
-            unit="batch"
+            unit="batch",
         )
 
         for i in batch_pbar:
-            batch_X = X_train[i:i + batch_size]
-            batch_y = y_train[i:i + batch_size]
-            batch_film = film_train[i:i + batch_size]
+            batch_X = X_train[i : i + batch_size]
+            batch_y = y_train[i : i + batch_size]
+            batch_film = film_train[i : i + batch_size]
 
             # Forward pass with FiLM features
             optimizer.zero_grad()
@@ -206,23 +206,22 @@ def train_model_with_film(
                 input_seq=batch_X,
                 film_features=batch_film,
                 target_seq=batch_y,
-                tf_ratio_overwrite=tf_ratio
+                tf_ratio_overwrite=tf_ratio,
             )
 
             # Debug first batch of first epoch
             if epoch == 0 and i == 0:
                 print("\n[DEBUG] First batch diagnostics with FiLM:")
+                print(f"  Input range: [{batch_X.min():.4f}, {batch_X.max():.4f}]")
                 print(
-                    f"  Input range: [{batch_X.min():.4f}, {batch_X.max():.4f}]")
-                print(
-                    f"  FiLM features range: [{batch_film.min():.4f}, {batch_film.max():.4f}]")
+                    f"  FiLM features range: [{batch_film.min():.4f}, {batch_film.max():.4f}]"
+                )
                 print(f"  FiLM features mean: {batch_film.mean(dim=0)}")
                 print(
-                    f"  Predictions range: [{predictions.min():.4f}, {predictions.max():.4f}]")
-                print(
-                    f"  Targets range: [{batch_y.min():.4f}, {batch_y.max():.4f}]")
-                print(
-                    f"  Has NaN in predictions: {torch.isnan(predictions).any()}")
+                    f"  Predictions range: [{predictions.min():.4f}, {predictions.max():.4f}]"
+                )
+                print(f"  Targets range: [{batch_y.min():.4f}, {batch_y.max():.4f}]")
+                print(f"  Has NaN in predictions: {torch.isnan(predictions).any()}")
 
             # Compute loss
             loss = criterion(predictions, batch_y)
@@ -230,13 +229,13 @@ def train_model_with_film(
             # Check for NaN/Inf
             if not torch.isfinite(loss):
                 print(
-                    f"\nWarning: Loss became {loss.item()} at epoch {epoch + 1}, batch {i // batch_size}")
+                    f"\nWarning: Loss became {loss.item()} at epoch {epoch + 1}, batch {i // batch_size}"
+                )
                 print(
-                    f"Predictions range: [{predictions.min():.4f}, {predictions.max():.4f}]")
-                print(
-                    f"Targets range: [{batch_y.min():.4f}, {batch_y.max():.4f}]")
-                print(
-                    f"  Has NaN in predictions: {torch.isnan(predictions).any()}")
+                    f"Predictions range: [{predictions.min():.4f}, {predictions.max():.4f}]"
+                )
+                print(f"Targets range: [{batch_y.min():.4f}, {batch_y.max():.4f}]")
+                print(f"  Has NaN in predictions: {torch.isnan(predictions).any()}")
                 raise ValueError("Loss is NaN or Inf - training stopped")
 
             # Backward pass
@@ -257,10 +256,9 @@ def train_model_with_film(
         losses.append(avg_loss)
 
         # Update epoch progress bar
-        epoch_pbar.set_postfix({
-            "loss": f"{avg_loss:.6f}",
-            "best": f"{min(losses):.6f}"
-        })
+        epoch_pbar.set_postfix(
+            {"loss": f"{avg_loss:.6f}", "best": f"{min(losses):.6f}"}
+        )
 
     return losses
 
@@ -271,7 +269,7 @@ def plot_film_results(
     film_test: torch.Tensor,
     predictions: torch.Tensor,
     losses: list[float],
-    save_path: str = "film_forecast_results.png"
+    save_path: str = "film_forecast_results.png",
 ):
     """Plot training loss and forecast results with FiLM features.
 
@@ -307,23 +305,29 @@ def plot_film_results(
 
     # Create time axis
     hist_time = np.arange(lookback_horizon)
-    future_time = np.arange(
-        lookback_horizon, lookback_horizon + forecast_horizon)
+    future_time = np.arange(lookback_horizon, lookback_horizon + forecast_horizon)
 
-    axes[1].plot(hist_time, historical, 'b-',
-                 linewidth=2, label='Historical Data')
-    axes[1].plot(future_time, ground_truth, 'g-',
-                 linewidth=2, label='Ground Truth')
-    axes[1].plot(future_time, forecast, 'r--', linewidth=2, label='Forecast')
-    axes[1].axhline(y=upper_bound, color='orange', linestyle=':',
-                    alpha=0.7, label='Upper Bound (FiLM)')
-    axes[1].axhline(y=lower_bound, color='purple', linestyle=':',
-                    alpha=0.7, label='Lower Bound (FiLM)')
-    axes[1].axvline(x=lookback_horizon, color='k', linestyle=':', alpha=0.5)
+    axes[1].plot(hist_time, historical, "b-", linewidth=2, label="Historical Data")
+    axes[1].plot(future_time, ground_truth, "g-", linewidth=2, label="Ground Truth")
+    axes[1].plot(future_time, forecast, "r--", linewidth=2, label="Forecast")
+    axes[1].axhline(
+        y=upper_bound,
+        color="orange",
+        linestyle=":",
+        alpha=0.7,
+        label="Upper Bound (FiLM)",
+    )
+    axes[1].axhline(
+        y=lower_bound,
+        color="purple",
+        linestyle=":",
+        alpha=0.7,
+        label="Lower Bound (FiLM)",
+    )
+    axes[1].axvline(x=lookback_horizon, color="k", linestyle=":", alpha=0.5)
     axes[1].set_xlabel("Time Step")
     axes[1].set_ylabel("Value")
-    axes[1].set_title(
-        "Time Series Forecast with FiLM Conditioning (First Test Sample)")
+    axes[1].set_title("Time Series Forecast with FiLM Conditioning (First Test Sample)")
     axes[1].legend()
     axes[1].grid(True, alpha=0.3)
 
@@ -331,10 +335,8 @@ def plot_film_results(
     upper_bounds = film_test[:, 0].detach().cpu().numpy()
     lower_bounds = film_test[:, 1].detach().cpu().numpy()
 
-    axes[2].hist(upper_bounds, bins=30, alpha=0.7,
-                 label='Upper Bounds', color='orange')
-    axes[2].hist(lower_bounds, bins=30, alpha=0.7,
-                 label='Lower Bounds', color='purple')
+    axes[2].hist(upper_bounds, bins=30, alpha=0.7, label="Upper Bounds", color="orange")
+    axes[2].hist(lower_bounds, bins=30, alpha=0.7, label="Lower Bounds", color="purple")
     axes[2].set_xlabel("Value")
     axes[2].set_ylabel("Frequency")
     axes[2].set_title("Distribution of FiLM Features (Upper/Lower Bounds)")
@@ -342,7 +344,7 @@ def plot_film_results(
     axes[2].grid(True, alpha=0.3)
 
     plt.tight_layout()
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
     print(f"\nPlot saved to: {save_path}")
     plt.show()
 
@@ -368,27 +370,26 @@ def main():
         hidden_layer_num=2,
         hidden_size=32,
         head_num=4,
+        query_group=2,
         use_causal=True,
         use_rope=True,
         expansion_factor=2.0,
-        forecast_aggregation='ema',
+        forecast_aggregation="ema",
         forecast_ema_period=5,
         learnable_forecast_residual_scale=True,
-        model_dtype='bfloat16',
-
+        model_dtype="bfloat16",
         # FiLM configuration
         use_film=True,
         film_feature_num=2,  # Upper bound and lower bound
         film_hidden_size=32,
-        film_dropout=0.,
+        film_dropout=0.0,
     )
 
     print("\n1. Generating noisy time series data with FiLM features...")
     print(f"   - Lookback horizon: {config.lookback_horizon}")
     print(f"   - Forecast horizon: {config.forecast_horizon}")
     print(f"   - Features: {config.feature_num}")
-    print(
-        f"   - FiLM features: {config.film_feature_num} (upper bound, lower bound)")
+    print(f"   - FiLM features: {config.film_feature_num} (upper bound, lower bound)")
 
     # Generate data with FiLM features
     X_train, y_train, film_train = generate_noisy_function(
@@ -416,8 +417,7 @@ def main():
     # Check data before normalization
     print("\n   - Before normalization:")
     print(f"     X_train range: [{X_train.min():.4f}, {X_train.max():.4f}]")
-    print(
-        f"     Film features range: [{film_train.min():.4f}, {film_train.max():.4f}]")
+    print(f"     Film features range: [{film_train.min():.4f}, {film_train.max():.4f}]")
 
     # Normalize data to prevent NaN during training
     print("\n   - Normalizing data...")
@@ -511,7 +511,7 @@ def main():
         film_test=film_test.cpu(),
         predictions=test_predictions.cpu(),
         losses=losses,
-        save_path="film_forecast_results.png"
+        save_path="film_forecast_results.png",
     )
 
     print("\n" + "=" * 60)

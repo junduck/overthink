@@ -1,7 +1,7 @@
 [project]
 name = "overthink"
 version = "0.1.0"
-description = "Add your description here"
+description = "A Hierarchical Reasoning Framework for Stock Market Forecasting"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -15,3 +15,13 @@ dependencies = [
     "torch>=2.9.0",
     "tqdm>=4.67.1",
 ]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = ["pytest>=9.0.2"]

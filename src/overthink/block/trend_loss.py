@@ -3,17 +3,18 @@ from typing import Literal
 import torch
 from torch import nn
 
-from layer.utils import ema_running
+from overthink.layer.utils import ema_running
 
 
 class MultiScaleTrendLoss(nn.Module):
-    def __init__(self,
-                 ema_periods: list[int],
-                 weights: list[float],
-                 reduction: Literal["mean", "sum", "none"] = "mean"):
+    def __init__(
+        self,
+        ema_periods: list[int],
+        weights: list[float],
+        reduction: Literal["mean", "sum", "none"] = "mean",
+    ):
         if len(ema_periods) != len(weights):
-            raise ValueError(
-                "ema_periods and weights must have the same length.")
+            raise ValueError("ema_periods and weights must have the same length.")
         super().__init__()
 
         self.ema_periods = ema_periods
@@ -25,9 +26,9 @@ class MultiScaleTrendLoss(nn.Module):
         for ema_period, weight in zip(self.ema_periods, self.weights):
             pred_ema = ema_running(pred, dim=1, period=ema_period)
             target_ema = ema_running(target, dim=1, period=ema_period)
-            mse = (pred_ema - target_ema).pow(2).mean(dim=1)        # [B]
+            mse = (pred_ema - target_ema).pow(2).mean(dim=1)  # [B]
             losses.append(weight * mse)
-        loss = torch.stack(losses, dim=0).sum(dim=0)                # [B]
+        loss = torch.stack(losses, dim=0).sum(dim=0)  # [B]
         if self.reduction == "mean":
             return loss.mean()
         elif self.reduction == "sum":
@@ -37,17 +38,18 @@ class MultiScaleTrendLoss(nn.Module):
 
 
 class MultiScaleTrendDirectionLoss(nn.Module):
-    def __init__(self,
-                 ema_periods: list[int],
-                 weights: list[float],
-                 reduction: Literal["mean", "sum", "none"],
-                 loss_type: Literal["hinge", "huber", "cosine", "softsign"],
-                 huber_margin: float,
-                 softness: float,
-                 norm_eps: float):
+    def __init__(
+        self,
+        ema_periods: list[int],
+        weights: list[float],
+        reduction: Literal["mean", "sum", "none"],
+        loss_type: Literal["hinge", "huber", "cosine", "softsign"],
+        huber_margin: float,
+        softness: float,
+        norm_eps: float,
+    ):
         if len(ema_periods) != len(weights):
-            raise ValueError(
-                "ema_periods and weights must have the same length.")
+            raise ValueError("ema_periods and weights must have the same length.")
         super().__init__()
 
         self.ema_periods = ema_periods
@@ -58,32 +60,35 @@ class MultiScaleTrendDirectionLoss(nn.Module):
         self.softness = softness
         self.norm_eps = norm_eps
 
-    def _hinge_loss(self,
-                    pred_delta: torch.Tensor,      # [B, S-1]
-                    target_delta: torch.Tensor,    # [B, S-1]
-                    ) -> torch.Tensor:
+    def _hinge_loss(
+        self,
+        pred_delta: torch.Tensor,  # [B, S-1]
+        target_delta: torch.Tensor,  # [B, S-1]
+    ) -> torch.Tensor:
         dir_agreement = pred_delta * target_delta
         scale_loss = torch.clamp(-dir_agreement, min=0).mean(dim=1)  # [B]
         return scale_loss  # [B]
 
-    def _huber_loss(self,
-                    pred_delta: torch.Tensor,      # [B, S-1]
-                    target_delta: torch.Tensor,    # [B, S-1]
-                    ) -> torch.Tensor:
+    def _huber_loss(
+        self,
+        pred_delta: torch.Tensor,  # [B, S-1]
+        target_delta: torch.Tensor,  # [B, S-1]
+    ) -> torch.Tensor:
         dir_agreement = pred_delta * target_delta
         step_err = (pred_delta - target_delta).abs()
         scale_loss = torch.where(
             dir_agreement < 0,
             step_err,
-            torch.clamp(self.huber_margin - dir_agreement,
-                        min=0).pow(2) / (2 * self.huber_margin)
+            torch.clamp(self.huber_margin - dir_agreement, min=0).pow(2)
+            / (2 * self.huber_margin),
         ).mean(dim=1)  # [B]
         return scale_loss  # [B]
 
-    def _cosine_loss(self,
-                     pred_delta: torch.Tensor,      # [B, S-1]
-                     target_delta: torch.Tensor,    # [B, S-1]
-                     ) -> torch.Tensor:
+    def _cosine_loss(
+        self,
+        pred_delta: torch.Tensor,  # [B, S-1]
+        target_delta: torch.Tensor,  # [B, S-1]
+    ) -> torch.Tensor:
         pred_delta_norm = pred_delta / (pred_delta.abs() + self.norm_eps)
         target_delta_norm = target_delta / (target_delta.abs() + self.norm_eps)
         # Cosine similarity: (-1, 1) -> scale loss: (0, 2)
@@ -91,14 +96,16 @@ class MultiScaleTrendDirectionLoss(nn.Module):
         scale_loss = 1 - cos_sim
         return scale_loss
 
-    def _softsign_loss(self,
-                       pred_delta: torch.Tensor,      # [B, S-1]
-                       target_delta: torch.Tensor,    # [B, S-1]
-                       ) -> torch.Tensor:
+    def _softsign_loss(
+        self,
+        pred_delta: torch.Tensor,  # [B, S-1]
+        target_delta: torch.Tensor,  # [B, S-1]
+    ) -> torch.Tensor:
         # Soft sign agreement using tanh
         step_err = (pred_delta - target_delta).abs()
-        soft_agreement = torch.tanh(
-            pred_delta / self.softness) * torch.tanh(target_delta / self.softness)
+        soft_agreement = torch.tanh(pred_delta / self.softness) * torch.tanh(
+            target_delta / self.softness
+        )
         scale_loss = ((1 - soft_agreement) * step_err).mean(dim=1)
         return scale_loss
 
@@ -114,13 +121,11 @@ class MultiScaleTrendDirectionLoss(nn.Module):
         """
         losses = []  # will hold [B] tensors
         for ema_period, weight in zip(self.ema_periods, self.weights):
-            pred_ema = ema_running(
-                pred, dim=1, period=ema_period)      # [B, S]
-            target_ema = ema_running(
-                target, dim=1, period=ema_period)  # [B, S]
+            pred_ema = ema_running(pred, dim=1, period=ema_period)  # [B, S]
+            target_ema = ema_running(target, dim=1, period=ema_period)  # [B, S]
 
             # First differences
-            pred_delta = pred_ema[:, 1:] - pred_ema[:, :-1]        # [B, S-1]
+            pred_delta = pred_ema[:, 1:] - pred_ema[:, :-1]  # [B, S-1]
             target_delta = target_ema[:, 1:] - target_ema[:, :-1]  # [B, S-1]
 
             if self.loss_type == "hinge":
@@ -139,5 +144,5 @@ class MultiScaleTrendDirectionLoss(nn.Module):
         if self.reduction == "mean":
             return loss.mean()  # scalar
         if self.reduction == "sum":
-            return loss.sum()   # scalar
+            return loss.sum()  # scalar
         return loss  # [B]

@@ -14,9 +14,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 
-# from model.goldfish import GoldfishModel
-from model.model_config import ModelConfig
-from model.overthink import OverthinkModel
+# from overthink.model.goldfish import GoldfishModel
+from overthink.model.model_config import ModelConfig
+from overthink.model.overthink import OverthinkModel
 
 
 def generate_synthetic_data(
@@ -56,9 +56,9 @@ def generate_synthetic_data(
 
     for i in range(num_samples):
         # Historical window
-        x = data[i:i + lookback_horizon]
+        x = data[i : i + lookback_horizon]
         # Future window
-        y = data[i + lookback_horizon:i + lookback_horizon + forecast_horizon]
+        y = data[i + lookback_horizon : i + lookback_horizon + forecast_horizon]
 
         X_list.append(x)
         y_list.append(y)
@@ -77,7 +77,9 @@ def generate_synthetic_data(
     return X, y
 
 
-def linear_teacher_forcing_ratio(epoch, total_epochs, initial_ratio=0.8, final_ratio=0.1):
+def linear_teacher_forcing_ratio(
+    epoch, total_epochs, initial_ratio=0.8, final_ratio=0.1
+):
     """Calculate teacher forcing ratio based on training progress."""
     # Linear decay from initial_ratio to final_ratio
     progress = epoch / total_epochs
@@ -130,37 +132,34 @@ def train_model(
             range(0, num_samples, batch_size),
             desc=f"Epoch {epoch + 1}/{num_epochs}",
             leave=False,
-            unit="batch"
+            unit="batch",
         )
 
         for i in batch_pbar:
-            batch_X = X_train[i:i + batch_size]
-            batch_y = y_train[i:i + batch_size]
+            batch_X = X_train[i : i + batch_size]
+            batch_y = y_train[i : i + batch_size]
 
             # Forward pass
             optimizer.zero_grad()
             tf_ratio = linear_teacher_forcing_ratio(epoch, num_epochs)
-            predictions = model(input_seq=batch_X,
-                                target_seq=batch_y,
-                                tf_ratio_overwrite=tf_ratio)
+            predictions = model(
+                input_seq=batch_X, target_seq=batch_y, tf_ratio_overwrite=tf_ratio
+            )
 
             # Debug first batch of first epoch
             if epoch == 0 and i == 0:
                 print("\n[DEBUG] First batch diagnostics:")
+                print(f"  Input range: [{batch_X.min():.4f}, {batch_X.max():.4f}]")
+                print(f"  Input mean/std: {batch_X.mean():.4f} / {batch_X.std():.4f}")
                 print(
-                    f"  Input range: [{batch_X.min():.4f}, {batch_X.max():.4f}]")
+                    f"  Predictions range: [{predictions.min():.4f}, {predictions.max():.4f}]"
+                )
                 print(
-                    f"  Input mean/std: {batch_X.mean():.4f} / {batch_X.std():.4f}")
-                print(
-                    f"  Predictions range: [{predictions.min():.4f}, {predictions.max():.4f}]")
-                print(
-                    f"  Predictions mean/std: {predictions.mean():.4f} / {predictions.std():.4f}")
-                print(
-                    f"  Targets range: [{batch_y.min():.4f}, {batch_y.max():.4f}]")
-                print(
-                    f"  Has NaN in predictions: {torch.isnan(predictions).any()}")
-                print(
-                    f"  Has Inf in predictions: {torch.isinf(predictions).any()}")
+                    f"  Predictions mean/std: {predictions.mean():.4f} / {predictions.std():.4f}"
+                )
+                print(f"  Targets range: [{batch_y.min():.4f}, {batch_y.max():.4f}]")
+                print(f"  Has NaN in predictions: {torch.isnan(predictions).any()}")
+                print(f"  Has Inf in predictions: {torch.isinf(predictions).any()}")
 
             # Compute loss
             loss = criterion(predictions, batch_y)
@@ -168,15 +167,14 @@ def train_model(
             # Check for NaN/Inf
             if not torch.isfinite(loss):
                 print(
-                    f"\nWarning: Loss became {loss.item()} at epoch {epoch + 1}, batch {i // batch_size}")
+                    f"\nWarning: Loss became {loss.item()} at epoch {epoch + 1}, batch {i // batch_size}"
+                )
                 print(
-                    f"Predictions range: [{predictions.min():.4f}, {predictions.max():.4f}]")
-                print(
-                    f"Targets range: [{batch_y.min():.4f}, {batch_y.max():.4f}]")
-                print(
-                    f"  Has NaN in predictions: {torch.isnan(predictions).any()}")
-                print(
-                    f"  Has Inf in predictions: {torch.isinf(predictions).any()}")
+                    f"Predictions range: [{predictions.min():.4f}, {predictions.max():.4f}]"
+                )
+                print(f"Targets range: [{batch_y.min():.4f}, {batch_y.max():.4f}]")
+                print(f"  Has NaN in predictions: {torch.isnan(predictions).any()}")
+                print(f"  Has Inf in predictions: {torch.isinf(predictions).any()}")
                 raise ValueError("Loss is NaN or Inf - training stopped")
 
             # Backward pass
@@ -197,10 +195,9 @@ def train_model(
         losses.append(avg_loss)
 
         # Update epoch progress bar
-        epoch_pbar.set_postfix({
-            "loss": f"{avg_loss:.6f}",
-            "best": f"{min(losses):.6f}"
-        })
+        epoch_pbar.set_postfix(
+            {"loss": f"{avg_loss:.6f}", "best": f"{min(losses):.6f}"}
+        )
 
     return losses
 
@@ -240,7 +237,7 @@ def plot_results(
     y_test: torch.Tensor,
     predictions: torch.Tensor,
     losses: list[float],
-    save_path: str = "forecast_results.png"
+    save_path: str = "forecast_results.png",
 ):
     """Plot training loss and forecast results.
 
@@ -271,15 +268,12 @@ def plot_results(
 
     # Create time axis
     hist_time = np.arange(lookback_horizon)
-    future_time = np.arange(
-        lookback_horizon, lookback_horizon + forecast_horizon)
+    future_time = np.arange(lookback_horizon, lookback_horizon + forecast_horizon)
 
-    axes[1].plot(hist_time, historical, 'b-',
-                 linewidth=2, label='Historical Data')
-    axes[1].plot(future_time, ground_truth, 'g-',
-                 linewidth=2, label='Ground Truth')
-    axes[1].plot(future_time, forecast, 'r--', linewidth=2, label='Forecast')
-    axes[1].axvline(x=lookback_horizon, color='k', linestyle=':', alpha=0.5)
+    axes[1].plot(hist_time, historical, "b-", linewidth=2, label="Historical Data")
+    axes[1].plot(future_time, ground_truth, "g-", linewidth=2, label="Ground Truth")
+    axes[1].plot(future_time, forecast, "r--", linewidth=2, label="Forecast")
+    axes[1].axvline(x=lookback_horizon, color="k", linestyle=":", alpha=0.5)
     axes[1].set_xlabel("Time Step")
     axes[1].set_ylabel("Value")
     axes[1].set_title("Time Series Forecast (First Test Sample)")
@@ -287,7 +281,7 @@ def plot_results(
     axes[1].grid(True, alpha=0.3)
 
     plt.tight_layout()
-    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.savefig(save_path, dpi=150, bbox_inches="tight")
     print(f"\nPlot saved to: {save_path}")
     plt.show()
 
@@ -316,10 +310,10 @@ def main():
         use_causal=True,
         use_rope=True,
         expansion_factor=2.0,
-        forecast_aggregation='ema',
+        forecast_aggregation="ema",
         forecast_ema_period=5,
         learnable_forecast_residual_scale=True,
-        model_dtype='bfloat16',
+        model_dtype="bfloat16",
     )
 
     print("\n1. Generating synthetic data...")
@@ -329,19 +323,19 @@ def main():
 
     # Generate data - Reduced for faster debugging
     X_train, y_train = generate_synthetic_data(
-        num_samples=200,      # Reduced from 800
+        num_samples=200,  # Reduced from 800
         lookback_horizon=config.lookback_horizon,
         forecast_horizon=config.forecast_horizon,
         feature_num=config.feature_num,
-        noise_level=0.1,     # Reduced noise
+        noise_level=0.1,  # Reduced noise
     )
 
     X_test, y_test = generate_synthetic_data(
-        num_samples=40,       # Reduced from 100
+        num_samples=40,  # Reduced from 100
         lookback_horizon=config.lookback_horizon,
         forecast_horizon=config.forecast_horizon,
         feature_num=config.feature_num,
-        noise_level=0.1,     # Reduced noise
+        noise_level=0.1,  # Reduced noise
     )
 
     print(f"   - Training samples: {X_train.size(0)}")
@@ -352,7 +346,8 @@ def main():
     print(f"     X_train range: [{X_train.min():.4f}, {X_train.max():.4f}]")
     print(f"     X_train mean/std: {X_train.mean():.4f} / {X_train.std():.4f}")
     print(
-        f"     Has NaN/Inf: {torch.isnan(X_train).any()} / {torch.isinf(X_train).any()}")
+        f"     Has NaN/Inf: {torch.isnan(X_train).any()} / {torch.isinf(X_train).any()}"
+    )
 
     # Normalize data to prevent NaN during training
     print("\n   - Normalizing data...")
@@ -372,12 +367,13 @@ def main():
 
     # Check after normalization
     print("\n   - After normalization:")
+    print(f"     X_train range: [{X_train_norm.min():.4f}, {X_train_norm.max():.4f}]")
     print(
-        f"     X_train range: [{X_train_norm.min():.4f}, {X_train_norm.max():.4f}]")
+        f"     X_train mean/std: {X_train_norm.mean():.4f} / {X_train_norm.std():.4f}"
+    )
     print(
-        f"     X_train mean/std: {X_train_norm.mean():.4f} / {X_train_norm.std():.4f}")
-    print(
-        f"     Has NaN/Inf: {torch.isnan(X_train_norm).any()} / {torch.isinf(X_train_norm).any()}")
+        f"     Has NaN/Inf: {torch.isnan(X_train_norm).any()} / {torch.isinf(X_train_norm).any()}"
+    )
 
     # Use normalized versions
     X_train = X_train_norm
@@ -421,7 +417,7 @@ def main():
         model=model,
         X_train=X_train,
         y_train=y_train,
-        num_epochs=50,        # Reduced from 100
+        num_epochs=50,  # Reduced from 100
         learning_rate=0.001,  # Reduced learning rate to prevent NaN
         batch_size=config.batch_size,
     )
@@ -446,7 +442,7 @@ def main():
         y_test=y_test.cpu(),
         predictions=test_predictions.cpu(),
         losses=losses,
-        save_path="forecast_results.png"
+        save_path="forecast_results.png",
     )
 
     print("\n" + "=" * 60)
