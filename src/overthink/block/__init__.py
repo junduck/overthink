@@ -4,14 +4,18 @@ from .temporal_mix import TemporalMixBlock, TemporalMixStack
 from .feature_mix import FeatureMixBlock
 from .forecast import AutoregressiveHead, DirectForecastHead
 from .film import FiLMBlock
+from .reasoning import ReasoningBlock
 
-__all__ = ["TransBlock",
-           "TransStack",
-           "MultiScaleTrendLoss",
-           "MultiScaleTrendDirectionLoss",
-           "FiLMBlock",
-           "FeatureMixBlock",
-           "TemporalMixBlock",
-           "TemporalMixStack",
-           "AutoregressiveHead",
-           "DirectForecastHead"]
+__all__ = [
+    "TransBlock",
+    "TransStack",
+    "ReasoningBlock",
+    "MultiScaleTrendLoss",
+    "MultiScaleTrendDirectionLoss",
+    "FiLMBlock",
+    "FeatureMixBlock",
+    "TemporalMixBlock",
+    "TemporalMixStack",
+    "AutoregressiveHead",
+    "DirectForecastHead",
+]

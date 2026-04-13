@@ -120,8 +120,7 @@ class TransStack(nn.Module):
             ]
         )
 
-    def forward(self, x: torch.Tensor, residual: torch.Tensor) -> torch.Tensor:
-        hidden = x + residual
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         for layer in self.layers:
-            hidden = layer(hidden)
-        return hidden
+            x = layer(x)
+        return x

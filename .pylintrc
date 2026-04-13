@@ -1,3 +1,6 @@
 [TYPECHECK]
 # not-callable false positive for torch.nn.functional
 ignored-modules=torch.nn.functional
+
+[MASTER]
+init-hook='import sys, os; sys.path.insert(0, os.path.join(os.getcwd(), "extern", "kronos"))'
