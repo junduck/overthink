@@ -26,14 +26,16 @@ def extract_timestamps(ts_col: pl.Series) -> torch.Tensor:
         [L, 5] long tensor: (minute_of_day, hour_of_day, day_of_week, day_of_month, month)
     """
     dt = ts_col.dt
-    minute_of_day = dt.hour() * 60 + dt.minute()
+    hour = dt.hour().cast(pl.Int32)
+    minute = dt.minute().cast(pl.Int32)
+    minute_of_day = hour * 60 + minute
     return torch.stack(
         [
             torch.tensor(minute_of_day.to_list(), dtype=torch.long),
-            torch.tensor(dt.hour().to_list(), dtype=torch.long),
-            torch.tensor(dt.weekday().to_list(), dtype=torch.long) - 1,
-            torch.tensor(dt.day().to_list(), dtype=torch.long) - 1,
-            torch.tensor(dt.month().to_list(), dtype=torch.long) - 1,
+            torch.tensor(hour.to_list(), dtype=torch.long),
+            torch.tensor(dt.weekday().cast(pl.Int32).to_list(), dtype=torch.long) - 1,
+            torch.tensor(dt.day().cast(pl.Int32).to_list(), dtype=torch.long) - 1,
+            torch.tensor(dt.month().cast(pl.Int32).to_list(), dtype=torch.long) - 1,
         ],
         dim=-1,
     )
@@ -94,12 +96,11 @@ class BSQOnlineDataset(IterableDataset):
             f"[BSQOnlineDataset] {len(self._codes)} codes, split={split}, val_cutoff={val_cutoff}"
         )
 
-    def __len__(self) -> int:
-        return -1
-
     def _dates_for(self, code: str) -> list[str]:
         code_dir = self.data_dir / code
-        dates = sorted(p.stem for p in code_dir.glob("*.pq"))
+        dates = sorted(
+            p.stem for p in code_dir.glob("*.pq") if not p.name.startswith(".")
+        )
         if self.split == "train":
             return [d for d in dates if d < self.val_cutoff]
         elif self.split == "val":

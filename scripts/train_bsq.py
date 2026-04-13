@@ -30,8 +30,10 @@ from pathlib import Path
 
 import torch
 import torch.nn.functional as F
+
+torch.set_float32_matmul_precision("high")
+torch.backends.cudnn.conv.fp32_precision = "tf32"
 from torch.utils.data import DataLoader
-from tqdm import tqdm
 
 from overthink.data.dataset_online import BSQOnlineDataset
 from overthink.data.tokenize import OnlineTokenizer
@@ -123,8 +125,7 @@ def train(
     n_batches = 0
     V = model.config.vocab_size
 
-    pbar = tqdm(loader, desc="Training", leave=False)
-    for ohlcv, timestamps, loss_mask in pbar:
+    for ohlcv, timestamps, loss_mask in loader:
         ohlcv = ohlcv.to(device)
         timestamps = timestamps.to(device)
         loss_mask = loss_mask.to(device)
@@ -157,7 +158,7 @@ def train(
 
         total_loss += loss.item()
         n_batches += 1
-        pbar.set_postfix(loss=f"{loss.item():.4f}")
+        print(f"\r  batch {n_batches} loss={loss.item():.4f}", end="", flush=True)
 
     return total_loss / max(n_batches, 1)
 
@@ -189,8 +190,7 @@ def evaluate(
     all_s2_target = []
     all_valid_mask = []
 
-    pbar = tqdm(loader, desc="Evaluating", leave=False)
-    for ohlcv, timestamps, loss_mask in pbar:
+    for ohlcv, timestamps, loss_mask in loader:
         if max_batches is not None and n_batches >= max_batches:
             break
 
