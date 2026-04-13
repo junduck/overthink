@@ -84,6 +84,10 @@ class BSQDataConfig(BaseModel):
     """Data pipeline configuration."""
 
     data_dir: str = Field(description="Root directory with {code}/{date}.pq layout")
+    tokenized_dir: str | None = Field(
+        default=None,
+        description="Pre-tokenized data directory. If set, training uses BSQPreTokenizedDataset.",
+    )
     tokenizer: str = Field(
         default="NeoQuasar/Kronos-Tokenizer-base",
         description="HuggingFace model ID or local path for Kronos tokenizer",

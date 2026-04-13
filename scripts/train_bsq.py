@@ -1,26 +1,20 @@
-"""Train OverthinkBSQ with online tokenization pipeline.
+"""Train OverthinkBSQ.
 
-Pipeline:
-    1. Dataset yields raw OHLCV + timestamps (cross-day context)
-    2. Training loop normalizes + tokenizes online (frozen Kronos)
-    3. Model predicts next-token via CE loss on today's portion
-    4. After each epoch: eval on held-out val split with full metrics
+Supports two data pipelines:
+    - Online: raw OHLCV → normalize + tokenize every batch (flexible, slow)
+    - Pre-tokenized: load pre-tokenized .pt files (fast, for repeated experiments)
 
 Usage:
-    # With config file
+    # Pre-tokenized (recommended for repeated experiments)
     uv run python scripts/train_bsq.py --config scripts/configs/bsq_small.json
 
-    # With CLI overrides (data_dir must be provided if not in config)
+    # Online pipeline (no pre-tokenization needed)
     uv run python scripts/train_bsq.py \
         --config scripts/configs/bsq_small.json \
-        --data-dir /Volumes/CN_book/cn_1m_ohlcv_per_code/ \
-        --epochs 3
+        --data-dir /path/to/cn_1m_ohlcv_per_code/
 
-    # Dry run (validate pipeline end-to-end)
-    uv run python scripts/train_bsq.py \
-        --config scripts/configs/bsq_small.json \
-        --data-dir /Volumes/CN_book/cn_1m_ohlcv_per_code/ \
-        --dry-run
+    # Dry run
+    uv run python scripts/train_bsq.py --config scripts/configs/bsq_small.json --dry-run
 """
 
 import argparse
@@ -36,6 +30,7 @@ torch.backends.cudnn.conv.fp32_precision = "tf32"
 from torch.utils.data import DataLoader
 
 from overthink.data.dataset_online import BSQOnlineDataset
+from overthink.data.dataset_pretokenized import BSQPreTokenizedDataset
 from overthink.data.tokenize import OnlineTokenizer
 from overthink.eval import (
     compute_perplexity,
@@ -90,8 +85,8 @@ def load_config(args: argparse.Namespace) -> BSQRunConfig:
     return cfg
 
 
-def collate_variable_length(batch):
-    """Pad variable-length samples to the same sequence length."""
+def collate_raw(batch):
+    """Collate raw OHLCV samples: pad variable-length sequences."""
     ohlcvs, timestamps, masks = zip(*batch)
 
     max_len = max(o.size(0) for o in ohlcvs)
@@ -111,7 +106,29 @@ def collate_variable_length(batch):
     return padded_ohlcv, padded_ts, padded_mask
 
 
-def train(
+def collate_tokenized(batch):
+    """Collate pre-tokenized samples: pad variable-length sequences."""
+    s1s, s2s, tss, masks = zip(*batch)
+
+    max_len = max(s.size(0) for s in s1s)
+    B = len(batch)
+
+    padded_s1 = torch.zeros(B, max_len, dtype=torch.long)
+    padded_s2 = torch.zeros(B, max_len, dtype=torch.long)
+    padded_ts = torch.zeros(B, max_len, 5, dtype=torch.long)
+    padded_mask = torch.zeros(B, max_len, dtype=torch.bool)
+
+    for i, (s1, s2, ts, mask) in enumerate(zip(s1s, s2s, tss, masks)):
+        L = s1.size(0)
+        padded_s1[i, :L] = s1
+        padded_s2[i, :L] = s2
+        padded_ts[i, :L] = ts
+        padded_mask[i, :L] = mask
+
+    return padded_s1, padded_s2, padded_ts, padded_mask
+
+
+def train_online(
     model: OverthinkBSQ,
     tokenizer: OnlineTokenizer,
     loader: DataLoader,
@@ -119,7 +136,7 @@ def train(
     device: torch.device,
     grad_clip: float = 1.0,
 ) -> float:
-    """One epoch of training."""
+    """One epoch of training with online tokenization."""
     model.train()
     total_loss = 0.0
     n_batches = 0
@@ -163,22 +180,145 @@ def train(
     return total_loss / max(n_batches, 1)
 
 
+def train_pretokenized(
+    model: OverthinkBSQ,
+    loader: DataLoader,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+    grad_clip: float = 1.0,
+) -> float:
+    """One epoch of training with pre-tokenized data."""
+    model.train()
+    total_loss = 0.0
+    n_batches = 0
+    V = model.config.vocab_size
+
+    for s1_ids, s2_ids, timestamps, loss_mask in loader:
+        s1_ids = s1_ids.to(device)
+        s2_ids = s2_ids.to(device)
+        timestamps = timestamps.to(device)
+        loss_mask = loss_mask.to(device)
+
+        ts_input = timestamps[:, :-1]
+        s1_input = s1_ids[:, :-1]
+        s2_input = s2_ids[:, :-1]
+        s1_target = s1_ids[:, 1:]
+        s2_target = s2_ids[:, 1:]
+        valid_mask = loss_mask[:, 1:]
+
+        s1_logits, s2_logits = model(s1_input, s2_input, ts_input)
+
+        s1_logits_flat = s1_logits.reshape(-1, V)
+        s2_logits_flat = s2_logits.reshape(-1, V)
+        s1_target_flat = s1_target.reshape(-1)
+        s2_target_flat = s2_target.reshape(-1)
+        valid_flat = valid_mask.reshape(-1)
+
+        loss_s1 = F.cross_entropy(s1_logits_flat, s1_target_flat, reduction="none")
+        loss_s2 = F.cross_entropy(s2_logits_flat, s2_target_flat, reduction="none")
+        loss = (loss_s1[valid_flat] + loss_s2[valid_flat]).mean()
+
+        optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
+        optimizer.step()
+
+        total_loss += loss.item()
+        n_batches += 1
+        print(f"\r  batch {n_batches} loss={loss.item():.4f}", end="", flush=True)
+
+    return total_loss / max(n_batches, 1)
+
+
 @torch.no_grad()
-def evaluate(
+def evaluate_pretokenized(
+    model: OverthinkBSQ,
+    loader: DataLoader,
+    device: torch.device,
+    max_batches: int | None = None,
+) -> dict:
+    """Evaluate on pre-tokenized data."""
+    model.eval()
+    V = model.config.vocab_size
+    total_loss = 0.0
+    n_batches = 0
+
+    all_s1_logits = []
+    all_s2_logits = []
+    all_s1_target = []
+    all_s2_target = []
+    all_valid_mask = []
+
+    for s1_ids, s2_ids, timestamps, loss_mask in loader:
+        if max_batches is not None and n_batches >= max_batches:
+            break
+
+        s1_ids = s1_ids.to(device)
+        s2_ids = s2_ids.to(device)
+        timestamps = timestamps.to(device)
+        loss_mask = loss_mask.to(device)
+
+        ts_input = timestamps[:, :-1]
+        s1_input = s1_ids[:, :-1]
+        s2_input = s2_ids[:, :-1]
+        s1_target = s1_ids[:, 1:]
+        s2_target = s2_ids[:, 1:]
+        valid_mask = loss_mask[:, 1:]
+
+        s1_logits, s2_logits = model(s1_input, s2_input, ts_input)
+
+        s1_logits_flat = s1_logits.reshape(-1, V)
+        s2_logits_flat = s2_logits.reshape(-1, V)
+        s1_target_flat = s1_target.reshape(-1)
+        s2_target_flat = s2_target.reshape(-1)
+        valid_flat = valid_mask.reshape(-1)
+
+        loss_s1 = F.cross_entropy(s1_logits_flat, s1_target_flat, reduction="none")
+        loss_s2 = F.cross_entropy(s2_logits_flat, s2_target_flat, reduction="none")
+        loss = (loss_s1[valid_flat] + loss_s2[valid_flat]).mean()
+        total_loss += loss.item()
+        n_batches += 1
+
+        all_s1_logits.append(s1_logits.cpu())
+        all_s2_logits.append(s2_logits.cpu())
+        all_s1_target.append(s1_target.cpu())
+        all_s2_target.append(s2_target.cpu())
+        all_valid_mask.append(valid_mask.cpu())
+
+    avg_loss = total_loss / max(n_batches, 1)
+
+    if n_batches == 0:
+        return {"val_loss": float("inf")}
+
+    cat_s1_logits = torch.cat(all_s1_logits, dim=0)
+    cat_s2_logits = torch.cat(all_s2_logits, dim=0)
+    cat_s1_target = torch.cat(all_s1_target, dim=0)
+    cat_s2_target = torch.cat(all_s2_target, dim=0)
+    cat_valid = torch.cat(all_valid_mask, dim=0)
+
+    ppl = compute_perplexity(
+        cat_s1_logits, cat_s2_logits, cat_s1_target, cat_s2_target, cat_valid
+    )
+    topk = compute_topk_accuracy(
+        cat_s1_logits, cat_s2_logits, cat_s1_target, cat_s2_target, cat_valid, k=10
+    )
+
+    return {
+        "val_loss": avg_loss,
+        "perplexity": ppl,
+        **topk,
+    }
+
+
+@torch.no_grad()
+def evaluate_online(
     model: OverthinkBSQ,
     tokenizer: OnlineTokenizer,
     loader: DataLoader,
     device: torch.device,
     max_batches: int | None = None,
 ) -> dict:
-    """Full evaluation: CE loss, perplexity, top-k accuracy.
-
-    Args:
-        max_batches: Limit eval to N batches (None = full dataset).
-
-    Returns:
-        Dict with all metrics.
-    """
+    """Evaluate on raw OHLCV data (online tokenization)."""
     model.eval()
     V = model.config.vocab_size
     total_loss = 0.0
@@ -198,7 +338,7 @@ def evaluate(
         timestamps = timestamps.to(device)
         loss_mask = loss_mask.to(device)
 
-        s1_ids, s2_ids, _mean, _std = tokenizer.tokenize_with_stats(ohlcv)
+        s1_ids, s2_ids = tokenizer.tokenize(ohlcv)
 
         ts_input = timestamps[:, :-1]
         s1_input = s1_ids[:, :-1]
@@ -253,7 +393,7 @@ def evaluate(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Train OverthinkBSQ (online pipeline)")
+    parser = argparse.ArgumentParser(description="Train OverthinkBSQ")
     parser.add_argument("--config", type=str, help="Path to JSON config file")
     parser.add_argument("--data-dir", type=str, default="")
     parser.add_argument("--tokenizer", type=str, default="")
@@ -277,10 +417,21 @@ def main():
 
     cfg = load_config(args)
 
+    use_pretokenized = (
+        cfg.data.tokenized_dir is not None
+        and Path(cfg.data.tokenized_dir).exists()
+        and any(Path(cfg.data.tokenized_dir).glob("*.pt"))
+    )
+
+    pipeline = "pre-tokenized" if use_pretokenized else "online"
+
     print("=" * 60)
-    print("OverthinkBSQ Training (Online Pipeline)")
+    print("OverthinkBSQ Training")
     print("=" * 60)
+    print(f"  pipeline:       {pipeline}")
     print(f"  data_dir:       {cfg.data.data_dir}")
+    if use_pretokenized:
+        print(f"  tokenized_dir:  {cfg.data.tokenized_dir}")
     print(f"  batch_size:     {cfg.train.batch_size}")
     print(f"  hidden_size:    {cfg.model.hidden_size}")
     print(f"  heads:          {cfg.model.head_num}")
@@ -292,16 +443,28 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"  device:         {device}")
 
-    if cfg.data.val_cutoff:
-        train_dataset = BSQOnlineDataset(
-            cfg.data.data_dir, split="train", val_cutoff=cfg.data.val_cutoff
-        )
-        val_dataset = BSQOnlineDataset(
-            cfg.data.data_dir, split="val", val_cutoff=cfg.data.val_cutoff
-        )
+    if use_pretokenized:
+        if cfg.data.val_cutoff:
+            train_dataset = BSQPreTokenizedDataset(
+                cfg.data.tokenized_dir, split="train", val_cutoff=cfg.data.val_cutoff
+            )
+            val_dataset = BSQPreTokenizedDataset(
+                cfg.data.tokenized_dir, split="val", val_cutoff=cfg.data.val_cutoff
+            )
+        else:
+            train_dataset = BSQPreTokenizedDataset(cfg.data.tokenized_dir)
+            val_dataset = None
     else:
-        train_dataset = BSQOnlineDataset(cfg.data.data_dir)
-        val_dataset = None
+        if cfg.data.val_cutoff:
+            train_dataset = BSQOnlineDataset(
+                cfg.data.data_dir, split="train", val_cutoff=cfg.data.val_cutoff
+            )
+            val_dataset = BSQOnlineDataset(
+                cfg.data.data_dir, split="val", val_cutoff=cfg.data.val_cutoff
+            )
+        else:
+            train_dataset = BSQOnlineDataset(cfg.data.data_dir)
+            val_dataset = None
 
     model = OverthinkBSQ(cfg.model).to(device)
     n_params = sum(p.numel() for p in model.parameters())
@@ -310,32 +473,35 @@ def main():
     if cfg.train.dry_run:
         print("\n--- Dry Run ---")
         sample = next(iter(train_dataset))
-        ohlcv, ts, mask = sample
-        print(f"  Sample shapes:  ohlcv={ohlcv.shape} ts={ts.shape} mask={mask.shape}")
-        print(f"  Context bars:   {(~mask).sum()} today bars: {mask.sum()}")
-
-        ohlcv_batch = ohlcv.unsqueeze(0).to(device)
-        tok = OnlineTokenizer(cfg.data.tokenizer, device=str(device))
-        s1, s2, mean, std = tok.tokenize_with_stats(ohlcv_batch)
-        print(f"  Token shapes:   s1={s1.shape} s2={s2.shape}")
-
-        ts_batch = ts.unsqueeze(0).to(device)
-        s1_logits, s2_logits = model(s1, s2, ts_batch)
-        print(f"  Output shapes:  s1_logits={s1_logits.shape}")
-
-        decoded = tok.decode(s1, s2, mean, std)
-        print(f"  Decoded shape:  {decoded.shape}")
-
-        if val_dataset is not None:
-            print("\n  Val dataset check:")
-            val_sample = next(iter(val_dataset))
-            print(f"  Val sample:     ohlcv={val_sample[0].shape}")
-
+        if use_pretokenized:
+            s1, s2, ts, mask = sample
+            print(
+                f"  Sample shapes:  s1={s1.shape} s2={s2.shape} ts={ts.shape} mask={mask.shape}"
+            )
+            print(f"  Context bars:   {(~mask).sum()} today bars: {mask.sum()}")
+            s1_logits, s2_logits = model(
+                s1.unsqueeze(0).to(device),
+                s2.unsqueeze(0).to(device),
+                ts.unsqueeze(0).to(device),
+            )
+            print(f"  Output shapes:  s1_logits={s1_logits.shape}")
+        else:
+            ohlcv, ts, mask = sample
+            print(
+                f"  Sample shapes:  ohlcv={ohlcv.shape} ts={ts.shape} mask={mask.shape}"
+            )
+            tok = OnlineTokenizer(cfg.data.tokenizer, device=str(device))
+            s1, s2 = tok.tokenize(ohlcv.unsqueeze(0).to(device))
+            print(f"  Token shapes:   s1={s1.shape} s2={s2.shape}")
+            s1_logits, s2_logits = model(s1, s2, ts.unsqueeze(0).to(device))
+            print(f"  Output shapes:  s1_logits={s1_logits.shape}")
         print("\nDry run complete.")
         return
 
-    tokenizer = OnlineTokenizer(cfg.data.tokenizer, device=str(device))
-    print(f"  Tokenizer:      {cfg.data.tokenizer}")
+    tokenizer = None
+    if not use_pretokenized:
+        tokenizer = OnlineTokenizer(cfg.data.tokenizer, device=str(device))
+        print(f"  Tokenizer:      {cfg.data.tokenizer}")
 
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay
@@ -352,10 +518,11 @@ def main():
     best_val_loss = float("inf")
     history = []
 
+    collate = collate_tokenized if use_pretokenized else collate_raw
     train_loader = DataLoader(
         train_dataset,
         batch_size=cfg.train.batch_size,
-        collate_fn=collate_variable_length,
+        collate_fn=collate,
         num_workers=cfg.train.num_workers,
     )
 
@@ -364,15 +531,21 @@ def main():
         val_loader = DataLoader(
             val_dataset,
             batch_size=cfg.train.batch_size,
-            collate_fn=collate_variable_length,
+            collate_fn=collate,
             num_workers=cfg.train.num_workers,
         )
 
     for epoch in range(cfg.train.epochs):
         t0 = time.time()
-        train_loss = train(
-            model, tokenizer, train_loader, optimizer, device, cfg.train.grad_clip
-        )
+
+        if use_pretokenized:
+            train_loss = train_pretokenized(
+                model, train_loader, optimizer, device, cfg.train.grad_clip
+            )
+        else:
+            train_loss = train_online(
+                model, tokenizer, train_loader, optimizer, device, cfg.train.grad_clip
+            )
         elapsed = time.time() - t0
 
         epoch_metrics = {
@@ -382,19 +555,24 @@ def main():
         }
 
         print(
-            f"Epoch {epoch + 1}/{cfg.train.epochs}  train_loss={train_loss:.4f}  "
+            f"\nEpoch {epoch + 1}/{cfg.train.epochs}  train_loss={train_loss:.4f}  "
             f"time={elapsed:.0f}s",
             end="",
         )
 
         if val_loader is not None:
-            val_metrics = evaluate(
-                model,
-                tokenizer,
-                val_loader,
-                device,
-                max_batches=cfg.train.val_max_batches,
-            )
+            if use_pretokenized:
+                val_metrics = evaluate_pretokenized(
+                    model, val_loader, device, max_batches=cfg.train.val_max_batches
+                )
+            else:
+                val_metrics = evaluate_online(
+                    model,
+                    tokenizer,
+                    val_loader,
+                    device,
+                    max_batches=cfg.train.val_max_batches,
+                )
             epoch_metrics.update(val_metrics)
             print(
                 f"  val_loss={val_metrics['val_loss']:.4f}  "
