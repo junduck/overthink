@@ -84,6 +84,10 @@ class BSQDataConfig(BaseModel):
     """Data pipeline configuration."""
 
     data_dir: str = Field(description="Root directory with {code}/{date}.pq layout")
+    market_dir: str | None = Field(
+        default=None,
+        description="Per-date whole-market dir ({date}-ohlcv-1m.pq). Used by pre_tokenize for fast bulk loading.",
+    )
     tokenized_dir: str | None = Field(
         default=None,
         description="Pre-tokenized data directory. If set, training uses BSQPreTokenizedDataset.",

@@ -1,8 +1,12 @@
 """Pre-tokenize raw OHLCV data using frozen Kronos BSQ tokenizer.
 
-Reads raw .pq files from {data_dir}/{code}/{date}.pq, builds cross-day
-(yesterday+today) windows, normalizes and tokenizes on GPU, saves per-code
-.pt files to {output_dir}/{code}.pt.
+Loads per-date whole-market files from {market_dir}/{date}-ohlcv-1m.pq,
+groups by code, builds cross-day windows, normalizes and tokenizes on GPU.
+Saves per-code .pt files to {output_dir}/{code}.pt.
+
+Approach: load one year of data at a time into memory (~1s per year),
+partition by code, accumulate samples across years, then tokenize all
+samples for each code in large GPU batches.
 
 Usage:
     uv run python scripts/pre_tokenize.py --config scripts/configs/bsq_local.json
@@ -11,72 +15,98 @@ Usage:
 
 import argparse
 import json
+import os
 import time
+from collections import defaultdict
 from pathlib import Path
 
+import polars as pl
 import torch
 
-from overthink.data.dataset_online import (
-    _safe_read,
-    df_to_tensors,
-)
+from overthink.data.dataset_online import OHLCV_COLS, extract_timestamps
 from overthink.data.tokenize import OnlineTokenizer
 from overthink.model.bsq_config import BSQDataConfig
 
 
-def _get_codes(data_dir: Path) -> list[str]:
-    return sorted(d.name for d in data_dir.iterdir() if d.is_dir())
+def _extract_date(filename: str) -> str:
+    """Extract date string from filename like '2018-01-02-ohlcv-1m.pq'."""
+    return filename[:10]
 
 
-def _get_dates(code_dir: Path) -> list[str]:
-    return sorted(p.stem for p in code_dir.glob("*.pq") if not p.name.startswith("."))
+def _get_years(market_dir: Path) -> list[str]:
+    """Get unique years from market data filenames."""
+    years = set()
+    for f in os.listdir(market_dir):
+        if f.endswith(".pq") and not f.startswith("."):
+            years.add(f[:4])
+    return sorted(years)
 
 
-def _collect_raw_samples(
-    data_dir: Path, code: str, min_bars: int
-) -> list[tuple[torch.Tensor, torch.Tensor, int, int, str]]:
-    """Read all dates for a code, build cross-day windows.
+def _load_year(market_dir: Path, year: str) -> dict[str, pl.DataFrame]:
+    """Load one year of market data, return {code: DataFrame}."""
+    files = sorted(
+        str(market_dir / f)
+        for f in os.listdir(market_dir)
+        if f.startswith(year) and f.endswith(".pq") and not f.startswith(".")
+    )
+    if not files:
+        return {}
 
-    Returns list of (ohlcv, timestamps, prev_len, today_len, date).
+    df = pl.read_parquet(files)
+    partitioned = df.partition_by("Code", as_dict=True)
+    return {k[0]: v for k, v in partitioned.items()}
+
+
+def _build_windows_for_year(
+    code_dfs: dict[str, pl.DataFrame],
+    min_bars: int,
+) -> dict[str, list[tuple]]:
+    """Build cross-day windows for all codes from one year of data.
+
+    Returns {code: [(ohlcv, timestamps, prev_len, today_len, date), ...]}
     """
-    code_dir = data_dir / code
-    dates = _get_dates(code_dir)
+    result = defaultdict(list)
 
-    samples = []
-    prev_ohlcv = None
-    prev_ts = None
+    for code, df in code_dfs.items():
+        df = df.sort("TimeInterval")
+        df = df.with_columns(df["TimeInterval"].dt.date().alias("_date"))
 
-    for date in dates:
-        path = code_dir / f"{date}.pq"
-        df = _safe_read(path)
-        if df is None or len(df) < min_bars:
-            prev_ohlcv = None
-            continue
+        prev_ohlcv = None
+        prev_ts = None
 
-        today_ohlcv, today_ts = df_to_tensors(df)
+        for day_df in df.partition_by("_date"):
+            day_df = day_df.sort("TimeInterval")
+            date_str = str(day_df["_date"][0])
 
-        if prev_ohlcv is not None:
-            ohlcv = torch.cat([prev_ohlcv, today_ohlcv], dim=0)
-            timestamps = torch.cat([prev_ts, today_ts], dim=0)
-            samples.append((ohlcv, timestamps, len(prev_ohlcv), len(today_ohlcv), date))
+            if len(day_df) < min_bars:
+                prev_ohlcv = None
+                continue
 
-        prev_ohlcv = today_ohlcv
-        prev_ts = today_ts
+            ohlcv = torch.tensor(day_df[OHLCV_COLS].to_numpy(), dtype=torch.float32)
+            ts = extract_timestamps(day_df["TimeInterval"])
 
-    return samples
+            if prev_ohlcv is not None:
+                combined_ohlcv = torch.cat([prev_ohlcv, ohlcv], dim=0)
+                combined_ts = torch.cat([prev_ts, ts], dim=0)
+                result[code].append(
+                    (combined_ohlcv, combined_ts, len(prev_ohlcv), len(ohlcv), date_str)
+                )
+
+            prev_ohlcv = ohlcv
+            prev_ts = ts
+
+    return result
 
 
 def _tokenize_code(
     tokenizer: OnlineTokenizer,
-    data_dir: Path,
-    code: str,
+    samples: list[tuple],
     out_file: Path,
-    min_bars: int,
     batch_size: int,
     device: torch.device,
 ):
-    raw = _collect_raw_samples(data_dir, code, min_bars)
-    if not raw:
+    """Tokenize all samples for one code and save."""
+    if not samples:
         return
 
     all_s1 = []
@@ -86,8 +116,8 @@ def _tokenize_code(
     all_today_lens = []
     all_dates = []
 
-    for i in range(0, len(raw), batch_size):
-        chunk = raw[i : i + batch_size]
+    for i in range(0, len(samples), batch_size):
+        chunk = samples[i : i + batch_size]
         max_len = max(s[0].size(0) for s in chunk)
         B = len(chunk)
 
@@ -133,24 +163,50 @@ def pre_tokenize(
     output_path.mkdir(parents=True, exist_ok=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    data_dir = Path(data_cfg.data_dir)
+
+    if data_cfg.market_dir:
+        market_dir = Path(data_cfg.market_dir)
+    else:
+        market_dir = Path(data_cfg.data_dir)
 
     print(f"Device: {device}")
-    print(f"Data dir: {data_cfg.data_dir}")
+    print(f"Market dir: {market_dir}")
     print(f"Output dir: {output_dir}")
     print(f"Tokenizer batch size: {tokenizer_batch_size}")
     print(f"Resume: {resume}")
 
     tokenizer = OnlineTokenizer(data_cfg.tokenizer, device=str(device))
 
-    codes = _get_codes(data_dir)
-    print(f"Total codes: {len(codes)}")
+    years = _get_years(market_dir)
+    print(f"Years: {years}")
 
+    accumulated: dict[str, list[tuple]] = defaultdict(list)
     done = 0
     skipped = 0
     failed = 0
     t_start = time.time()
 
+    for yi, year in enumerate(years):
+        t0 = time.time()
+        print(f"\n--- Loading {year} ({yi + 1}/{len(years)}) ---")
+
+        code_dfs = _load_year(market_dir, year)
+        if not code_dfs:
+            print(f"  No data for {year}")
+            continue
+        print(f"  Loaded {len(code_dfs)} codes in {time.time() - t0:.1f}s")
+
+        windows = _build_windows_for_year(code_dfs, data_cfg.min_bars)
+        print(
+            f"  Built {sum(len(v) for v in windows.values())} windows across {len(windows)} codes in {time.time() - t0:.1f}s"
+        )
+
+        for code, new_samples in windows.items():
+            accumulated[code].extend(new_samples)
+
+    print(f"\n--- Tokenizing {len(accumulated)} codes ---")
+
+    codes = sorted(accumulated.keys())
     for ci, code in enumerate(codes):
         out_file = output_path / f"{code}.pt"
         if resume and out_file.exists():
@@ -160,10 +216,8 @@ def pre_tokenize(
         try:
             _tokenize_code(
                 tokenizer,
-                data_dir,
-                code,
+                accumulated[code],
                 out_file,
-                data_cfg.min_bars,
                 tokenizer_batch_size,
                 device,
             )
@@ -174,13 +228,12 @@ def pre_tokenize(
             if out_file.exists():
                 out_file.unlink()
 
-        if (ci + 1) % 100 == 0 or ci == len(codes) - 1:
+        if (ci + 1) % 500 == 0 or ci == len(codes) - 1:
             elapsed = time.time() - t_start
-            rate = (ci + 1) / elapsed
             print(
                 f"  [{ci + 1}/{len(codes)}] "
                 f"done={done} skipped={skipped} failed={failed} "
-                f"rate={rate:.1f} codes/s"
+                f"elapsed={elapsed:.0f}s"
             )
 
     elapsed = time.time() - t_start
