@@ -138,6 +138,7 @@ def main():
     parser.add_argument("--lr", type=float, default=None)
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--ckpt-path", type=str, default="")
+    parser.add_argument("--resume", action="store_true", help="Resume from latest checkpoint")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -268,8 +269,25 @@ def main():
 
     best_loss = float("inf")
     history = []
+    start_epoch = 0
 
-    for epoch in range(cfg.train.epochs):
+    if args.resume:
+        latest = ckpt_dir / "latest.pt"
+        if latest.exists():
+            ckpt = torch.load(latest, weights_only=False)
+            model.load_state_dict(ckpt["model_state_dict"])
+            optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+            scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+            start_epoch = ckpt["epoch"] + 1
+            best_loss = ckpt.get("best_loss", float("inf"))
+            if (ckpt_dir / "history.json").exists():
+                with open(ckpt_dir / "history.json") as f:
+                    history = json.load(f)
+            print(f"  Resumed from epoch {ckpt['epoch'] + 1}, best_loss={best_loss:.4f}")
+        else:
+            print("  No checkpoint found, starting fresh")
+
+    for epoch in range(start_epoch, cfg.train.epochs):
         t0 = time.time()
         metrics = train_one_epoch(
             model, loader, optimizer, scheduler, device,
@@ -296,14 +314,28 @@ def main():
         if metrics["train_loss"] < best_loss:
             best_loss = metrics["train_loss"]
             torch.save(
-                {"config": cfg.model.model_dump(), "model_state_dict": model.state_dict(), "epoch": epoch},
+                {
+                    "config": cfg.model.model_dump(),
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "scheduler_state_dict": scheduler.state_dict(),
+                    "best_loss": best_loss,
+                    "epoch": epoch,
+                },
                 ckpt_dir / "best_model.pt",
             )
             print("  *best*", end="")
 
         print()
         torch.save(
-            {"config": cfg.model.model_dump(), "model_state_dict": model.state_dict(), "epoch": epoch},
+            {
+                "config": cfg.model.model_dump(),
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "scheduler_state_dict": scheduler.state_dict(),
+                "best_loss": best_loss,
+                "epoch": epoch,
+            },
             ckpt_dir / "latest.pt",
         )
         history.append(epoch_metrics)
