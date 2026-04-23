@@ -2,13 +2,16 @@
 
 Handles instance-level z-score normalization and tokenization in a single
 callable, designed to run inside the training loop on GPU.
+
+Also provides SIGRegOnlineTokenizer which wraps SIGRegTokenizer — no
+z-score normalization needed since SIGReg handles distribution matching
+in latent space.
 """
 
 import sys
 from pathlib import Path
 
 import torch
-import torch.nn.functional as F
 
 
 def _load_kronos_tokenizer(tokenizer_path: str):
@@ -99,3 +102,50 @@ class OnlineTokenizer:
         """
         reconstructed = self.tokenizer.decode((s1_ids, s2_ids), half=True)
         return reconstructed * std + mean
+
+
+class SIGRegOnlineTokenizer:
+    """Frozen SIGRegTokenizer — no z-score normalization.
+
+    SIGReg forces encoder latents to N(0, I), so raw input is tokenized
+    directly. Same raw candle always gets the same token.
+
+    Args:
+        tokenizer: A trained SIGRegTokenizer instance.
+        device: torch device.
+    """
+
+    def __init__(self, tokenizer, device: str = "cpu"):
+        self.device = device
+        self.tokenizer = tokenizer.to(device)
+        self.tokenizer.eval()
+
+    @torch.no_grad()
+    def tokenize(self, ohlcv: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Tokenize raw OHLCV data (no normalization).
+
+        Args:
+            ohlcv: [B, S, 6] raw OHLCV values.
+
+        Returns:
+            (s1_ids, s2_ids) each [B, S] integer token IDs.
+        """
+        s1_ids, s2_ids = self.tokenizer.encode(ohlcv, half=True)
+        return s1_ids, s2_ids
+
+    @torch.no_grad()
+    def decode(
+        self,
+        s1_ids: torch.Tensor,
+        s2_ids: torch.Tensor,
+    ) -> torch.Tensor:
+        """Decode tokens back to OHLCV space.
+
+        Args:
+            s1_ids: [B, S] coarse subtoken IDs.
+            s2_ids: [B, S] fine subtoken IDs.
+
+        Returns:
+            [B, S, 6] reconstructed OHLCV.
+        """
+        return self.tokenizer.decode((s1_ids, s2_ids), half=True)

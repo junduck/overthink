@@ -1,0 +1,33 @@
+{
+  "data": {
+    "sqlite_dir": "/Volumes/CN_book/cn_1m_ohlcv_sqlite",
+    "window_size": 200,
+    "stride": 30
+  },
+  "train": {
+    "batch_size": 128,
+    "lr": 2e-4,
+    "weight_decay": 0.1,
+    "betas": [0.9, 0.95],
+    "epochs": 30,
+    "grad_clip": 2.0,
+    "warmup_pct": 0.03,
+    "num_workers": 4,
+    "ckpt_path": "checkpoints/sigreg_tokenizer"
+  },
+  "model": {
+    "d_in": 6,
+    "d_model": 256,
+    "n_heads": 4,
+    "ff_dim": 512,
+    "n_enc_layers": 3,
+    "n_dec_layers": 3,
+    "encoder_window": 200,
+    "s1_bits": 10,
+    "s2_bits": 10,
+    "sigreg_lambda": 0.05,
+    "sigreg_num_slices": 256,
+    "sigreg_t_max": 5.0,
+    "sigreg_n_points": 17
+  }
+}
