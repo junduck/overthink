@@ -233,7 +233,21 @@ def main():
         betas=cfg.train.betas,
     )
 
-    steps_per_epoch = len(loader)
+    # Estimate steps: count windows from a sample of codes
+    # Per code: ~475K bars, window=200 stride=30 => ~15827 windows, aligned to batch_size
+    import sqlite3
+    sample_dbs = ds._db_files[:min(10, len(ds._db_files))]
+    windows_per_code = []
+    for db_path in sample_dbs:
+        conn = sqlite3.connect(str(db_path))
+        rows = conn.execute("SELECT COUNT(*) FROM bars").fetchone()[0]
+        conn.close()
+        n_windows = (rows - cfg.data.window_size) // cfg.data.stride + 1
+        n_aligned = (n_windows // cfg.train.batch_size) * cfg.train.batch_size
+        windows_per_code.append(n_aligned)
+    avg_windows = sum(windows_per_code) / len(windows_per_code)
+    total_windows = int(avg_windows * len(ds._db_files))
+    steps_per_epoch = total_windows // cfg.train.batch_size
     total_steps = steps_per_epoch * cfg.train.epochs
     scheduler = OneCycleLR(
         optimizer,
